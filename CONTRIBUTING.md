@@ -67,11 +67,9 @@ cargo doc --no-deps --document-private-items --open
 ## Continuous Integration
 
 Every pull request and push to `main` runs [ci.yml](.github/workflows/ci.yml),
-which checks the formatting, builds the crate, runs Clippy, the tests and the
-coverage, and builds the documentation. Pushes to `main` also publish the
-documentation and the coverage report to [GitHub Pages][pages] with
-[docs.yml](.github/workflows/docs.yml).
+which checks the formatting, builds the crate, runs Clippy and the tests, and
+builds the documentation. The coverage job prints a summary on the run's page
+and uploads the HTML report as the `coverage` artifact.
 
 [cargo-llvm-cov]: https://github.com/taiki-e/cargo-llvm-cov
-[pages]: https://anheuermann.github.io/homotopy_nls_solver/
 [rustup]: https://rustup.rs/

@@ -1,8 +1,10 @@
 name: Documentation and coverage
 
+# Disabled while the repository is private, GitHub Pages for private
+# repositories needs a paid plan. To enable it again, add:
+#   push:
+#     branches: [main]
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
