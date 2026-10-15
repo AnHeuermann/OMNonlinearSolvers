@@ -25,91 +25,9 @@
  *
  */
 
-use faer::Mat;
 use permuted_matrix::PermutedMatrix;
 
-/// Gaussian elimination with complete ("total") pivoting
-///
-/// Solve a linear equation system
-/// ```tex
-/// A · y = 0,   with one entry of y fixed to 1
-/// ```
-/// where `A` is a `n×(n+1)` column-major matrix, `y` a vector of size `n+1`.
-fn total_pivot_search(matrix: &Mat<f64>, mut vector_y: &[f64], pos: Option<usize>) {
-    let nrows = matrix.nrows();
-    let ncols = matrix.ncols();
-    assert!(
-        nrows + 1 == ncols,
-        "Wrong matrix shape {0}x{1}",
-        nrows,
-        ncols
-    );
-
-    assert!(
-        pos.unwrap_or(0) <= ncols,
-        "Position argument `pos` out of range!"
-    );
-
-    // Assume full rank of matrix [dim_1 × dim_2] = [n × (n+1)]
-    let rank = nrows;
-
-    let mut row_permutation: Box<[usize]> = (0..nrows).collect();
-    let mut column_permutation: Box<[usize]> = (0..ncols).collect();
-
-    let mut pivot_element = nrows;
-    match pos {
-        None => {
-            pivot_element = ncols;
-        }
-        Some(pos) => {
-            column_permutation[nrows] = pos;
-            column_permutation[pos] = nrows;
-        }
-    };
-
-    for i in 0..nrows {}
-
-    // return position_larges_value;
-}
-
-#[cfg(test)]
-mod total_pivot_tests {
-    use super::*;
-    use faer::mat;
-
-    #[test]
-    #[ignore = "total_pivot_search is not implemented yet"]
-    /// Solve:
-    /// ```text
-    /// 2·x₁ + 1·x₂ = 5
-    /// 1·x₁ + 3·x₂ = 10
-    /// ```
-    ///represented as
-    /// ```text
-    ///        x₁   x₂   last column
-    /// A = [   2    1    -5  ]
-    ///     [   1    3   -10  ]
-    /// ```
-    fn total_pivot_test_1() {
-        let a = mat![[2.0, 1.0, -5.0], [1.0, 3.0, -10.0],];
-
-        let vector_y: [f64; 3] = [0.0, 0.0, 0.0];
-
-        total_pivot_search(&a, &vector_y, Some(2));
-
-        assert_eq!(vector_y, [1., 3., 1.], "Test failed");
-    }
-}
-
-/// Pivot element found by [`pivot_search`]
-struct Pivot {
-    /// Logical row of the pivot element
-    row: usize,
-    /// Logical column of the pivot element
-    column: usize,
-    /// Absolute value of the pivot element
-    abs_value: f64,
-}
+use crate::Pivot;
 
 /// Find the pivot element for elimination step `stage`.
 ///
@@ -127,7 +45,7 @@ struct Pivot {
 /// # Panics
 ///
 /// Panics if `stage` is not a valid row and column index of `mat`.
-fn pivot_search(mat: &PermutedMatrix<f64>, stage: usize) -> Pivot {
+pub(crate) fn pivot_search(mat: &PermutedMatrix<f64>, stage: usize) -> Pivot {
     let mut max_abs_value = mat[(stage, stage)].abs();
     let mut col_index = stage;
     let mut row_index = stage;
@@ -135,7 +53,7 @@ fn pivot_search(mat: &PermutedMatrix<f64>, stage: usize) -> Pivot {
     for row in stage..mat.nrows() {
         for col in stage..mat.ncols() {
             let current_abs_value = mat[(row, col)].abs();
-            if (current_abs_value > max_abs_value) {
+            if current_abs_value > max_abs_value {
                 max_abs_value = current_abs_value;
                 col_index = col;
                 row_index = row;

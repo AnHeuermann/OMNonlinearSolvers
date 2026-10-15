@@ -29,4 +29,15 @@
 
 // int solveSystemWithTotalPivotSearch(DATA *data, int n, double* x, double* A, int* indRow, int* indCol, int *pos, int *rank, int casualTearingSet)
 
-mod total_pivot_search;
+mod pivot_search;
+mod solve;
+
+/// Pivot element found by [`pivot_search`]
+struct Pivot {
+    /// Logical row of the pivot element
+    row: usize,
+    /// Logical column of the pivot element
+    column: usize,
+    /// Absolute value of the pivot element
+    abs_value: f64,
+}

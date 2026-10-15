@@ -1,9 +1,10 @@
 [package]
-name = "linear_solver"
+name = "total_pivot_solver"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
 faer.workspace = true
+log.workspace = true
 permuted_matrix = { path = "../permuted_matrix" }

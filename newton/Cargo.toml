@@ -5,5 +5,4 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-linear_solver = { path = "../linear_solver" }
-log = "0.4.34"
+total_pivot_solver = { path = "../total_pivot_solver" }
