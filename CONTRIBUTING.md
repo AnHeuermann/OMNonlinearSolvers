@@ -41,6 +41,18 @@ cargo fmt
 cargo clippy --all-targets
 ```
 
+## License Headers
+
+Every Rust file must start with the OpenModelica Run-Time System license header,
+with the current year in the copyright line. Add missing headers and update the
+year with:
+
+```sh
+.ci/check_license.py --fix
+```
+
+Without `--fix`, the script only checks the files.
+
 ## Coverage
 
 Coverage is measured with [cargo-llvm-cov][cargo-llvm-cov]. Install it once:
@@ -67,9 +79,9 @@ cargo doc --no-deps --document-private-items --open
 ## Continuous Integration
 
 Every pull request and push to `main` runs [ci.yml](.github/workflows/ci.yml),
-which checks the formatting, builds the crate, runs Clippy and the tests, and
-builds the documentation. The coverage job prints a summary on the run's page
-and uploads the HTML report as the `coverage` artifact.
+which checks the formatting and license headers, builds the crate, runs Clippy
+and the tests, and builds the documentation. The coverage job prints a summary
+on the run's page and uploads the HTML report as the `coverage` artifact.
 
 [cargo-llvm-cov]: https://github.com/taiki-e/cargo-llvm-cov
 [rustup]: https://rustup.rs/
