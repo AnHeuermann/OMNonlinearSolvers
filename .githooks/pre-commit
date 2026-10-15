@@ -1,5 +1,6 @@
 #!/bin/sh
-# Format staged Rust files with rustfmt before committing.
+# Add missing license headers to staged Rust files and format them with
+# rustfmt before committing.
 #
 # Enable with: git config core.hooksPath .githooks
 
@@ -9,22 +10,37 @@ files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.rs')
 [ -z "$files" ] && exit 0
 
 # Re-staging a file that also has unstaged changes would sneak those changes
-# into the commit, so only check those files instead of formatting them.
+# into the commit, so only check those files instead of fixing them.
 partial=""
+complete=""
 for f in $files; do
-  git diff --quiet -- "$f" || partial="$partial $f"
+  if git diff --quiet -- "$f"; then
+    complete="$complete $f"
+  else
+    partial="$partial $f"
+  fi
 done
 
 edition=$(sed -n 's/^edition *= *"\([0-9]*\)".*/\1/p' Cargo.toml)
 
 if [ -n "$partial" ]; then
+  failed=0
+  if ! .ci/check_license.py $partial; then
+    failed=1
+  fi
   if ! rustfmt --edition "$edition" --check $partial >/dev/null; then
     echo "pre-commit: these files are partially staged and not formatted:" >&2
     for f in $partial; do echo "  $f" >&2; done
-    echo "Run 'cargo fmt', stage the result and commit again." >&2
+    failed=1
+  fi
+  if [ "$failed" -ne 0 ]; then
+    echo "Run '.ci/check_license.py --fix' and 'cargo fmt', stage the result and commit again." >&2
     exit 1
   fi
 fi
 
-rustfmt --edition "$edition" $files
-git add $files
+if [ -n "$complete" ]; then
+  .ci/check_license.py --fix $complete
+  rustfmt --edition "$edition" $complete
+  git add $complete
+fi

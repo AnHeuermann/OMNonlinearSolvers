@@ -25,7 +25,7 @@
  *
  */
 
-use homotopy_nls_solver::data_homotopy::allocate_homotopy_data;
+use homotopy_core::data::homotopy_data::allocate_homotopy_data;
 
 #[test]
 fn alloc_homotopy_solver() {

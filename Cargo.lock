@@ -3,5 +3,12 @@
 version = 4
 
 [[package]]
-name = "homotopy_nls_solver"
+name = "homotopy_capi"
+version = "0.1.0"
+dependencies = [
+ "homotopy_core",
+]
+
+[[package]]
+name = "homotopy_core"
 version = "0.1.0"

@@ -1,5 +1,8 @@
-[package]
-name = "homotopy_nls_solver"
+[workspace]
+resolver = "3"
+members = ["homotopy_core", "homotopy_capi"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 license = "BSD-3-Clause OR AGPL-3.0-only OR LicenseRef-OSMC-PL-1.8"

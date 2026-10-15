@@ -26,8 +26,7 @@
  */
 
 use crate::config::CONFIGURATION;
-use crate::data_homotopy::TearingKind::Unknown;
-use crate::nls_user_data::NonlinearSystemUserData;
+use crate::data::nonlinear_system_data::NonlinearSystemUserData;
 
 enum TearingKind {
     Unknown,
@@ -183,7 +182,7 @@ pub fn allocate_homotopy_data(
         number_of_function_evaluations: 0,
         max_number_of_iteartions: size * 100,
 
-        causal_tearing_set: Unknown,
+        causal_tearing_set: TearingKind::Unknown,
 
         x: vec![0.0; (size + 1) as usize].into_boxed_slice(),
         x0: vec![0.0; (size + 1) as usize].into_boxed_slice(),

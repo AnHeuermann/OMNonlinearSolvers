@@ -1,0 +1,13 @@
+[package]
+name = "homotopy_capi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+# staticlib: linked into the OpenModelica C runtime.
+# rlib: lets Rust tests and other crates use it.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+homotopy_core = { path = "../homotopy_core" }

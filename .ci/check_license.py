@@ -4,9 +4,10 @@ Check that all Rust source files start with the OpenModelica Run-Time System
 license header and that its copyright year is the current year.
 
 Usage:
-  check_license.py [--fix]
+  check_license.py [--fix] [FILE...]
 
   --fix   Add missing headers and update outdated copyright years.
+  FILE    Rust files to check. Default: all Rust files in the repository.
 
 Exit codes:
   0  All files pass (or all failures were fixed with --fix).
@@ -102,11 +103,18 @@ def main() -> int:
         action="store_true",
         help="add missing headers and update outdated copyright years",
     )
+    parser.add_argument(
+        "files",
+        nargs="*",
+        type=Path,
+        help="Rust files to check (default: all Rust files in the repository)",
+    )
     args = parser.parse_args()
 
     root = Path(__file__).resolve().parent.parent
+    paths = [f.resolve() for f in args.files] if args.files else rust_files(root)
     failed = 0
-    for path in rust_files(root):
+    for path in paths:
         error = check_file(path, args.fix)
         if error:
             failed += 1

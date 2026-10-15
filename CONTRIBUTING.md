@@ -6,8 +6,10 @@ Install a stable Rust toolchain with [rustup][rustup].
 
 ### Git hook
 
-The repository ships a pre-commit hook in [.githooks/](.githooks/) that formats
-staged Rust files with `rustfmt` on every commit. Enable it once after cloning:
+The repository ships a pre-commit hook in [.githooks/](.githooks/) that runs on
+every commit. For staged Rust files it adds a missing license header, updates an
+outdated copyright year and formats the file with `rustfmt`. Enable it once
+after cloning:
 
 ```sh
 git config core.hooksPath .githooks
@@ -17,8 +19,9 @@ This only changes the configuration of your local clone. To disable the hook
 again, run `git config --unset core.hooksPath`.
 
 If a staged file also has unstaged changes, the hook only checks it, so that the
-unstaged changes don't end up in the commit. When such a file is not formatted,
-the commit is aborted. Run `cargo fmt`, stage the result and commit again.
+unstaged changes don't end up in the commit. When such a file has no valid
+license header or is not formatted, the commit is aborted. Run
+`.ci/check_license.py --fix` and `cargo fmt`, stage the result and commit again.
 
 ## Build
 
@@ -51,7 +54,8 @@ year with:
 .ci/check_license.py --fix
 ```
 
-Without `--fix`, the script only checks the files.
+Without `--fix`, the script only checks the files. Pass file names to check only
+those files instead of all Rust files in the repository.
 
 ## Coverage
 

@@ -25,12 +25,18 @@
  *
  */
 
-mod c_interface;
-mod config;
-pub mod data_homotopy;
-mod flags;
-mod linear_algebra;
-mod linear_solver;
-mod newton;
-mod nls_user_data;
-mod print;
+//! The model side of a nonlinear system: implements `homotopy_core`'s model
+//! trait with the function pointers of `NONLINEAR_SYSTEM_DATA`.
+
+// Residual, from NONLINEAR_SYSTEM_DATA:
+// void (*residualFunc)(RESIDUAL_USERDATA* userData, const double* x, double* res, const int* flag)
+
+// Residual for a casual tearing set, returns non-zero if a constraint is violated:
+// int (*residualFuncConstraints)(RESIDUAL_USERDATA* userData, const double* x, double* res, const int* flag)
+
+// Only checked for NULL, marks a casual tearing set:
+// int (*strictTearingFunctionCall)(DATA* data, threadData_t* threadData)
+
+// Analytical Jacobian, from jacobian_util.h, used if jacobianIndex != -1.
+// Dense, column-major, min(sizeRows, sizeCols) rows:
+// void evalJacobian(DATA* data, threadData_t* threadData, JACOBIAN* jacobian, JACOBIAN* parentJacobian, modelica_real* jac, modelica_boolean isDense)

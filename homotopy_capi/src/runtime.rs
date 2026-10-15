@@ -25,32 +25,32 @@
  *
  */
 
-use std::ffi::c_void;
+//! Runtime state the solver reads and writes, apart from the model functions.
+//!
+//! NONLINEAR_SYSTEM_DATA
+//! - read: `size`, `equationIndex`, `homotopySupport`, `initHomotopy`,
+//!   `mixedSystem`, `min`, `max`, `nominal`, `nlsxExtrapolation`, `nlsx`
+//! - written: `nlsx` (solution), `numberOfFEval`, `numberOfIterations`,
+//!   `numberOfJEval`, `numberOfCall`, `jacobianTime`
+//!
+//! DATA
+//! - read: `localData[0]->timeValue`, `simulationInfo->discreteCall`,
+//!   `simulationInfo->initial`, `simulationInfo->relations`,
+//!   `simulationInfo->relationsPre`, `simulationInfo->homotopySteps`,
+//!   `simulationInfo->nlsLinearSolver`, `modelData->nRelations`,
+//!   `modelData->modelFilePrefix`, `callback->homotopyMethod`
+//! - written: `simulationInfo->solveContinuous`
 
-pub struct Jacobian {
-    /// Pointer to Jacobian of type `JACOBIAN*`
-    jacobian: *mut c_void,
+// Fallback solver, from nonlinearSolverHybrd.h:
+// DATA_HYBRD* allocateHybrdData(size_t size, NLS_USERDATA* userData)
+// void freeHybrdData(DATA_HYBRD* hybrdData)
+// NLS_SOLVER_STATUS solveHybrd(DATA *data, threadData_t *threadData, NONLINEAR_SYSTEM_DATA* nlsData)
 
-    /// Number of Rows
-    pub size_rows: u32,
-    /// Number of Columns
-    pub size_cols: u32,
-}
+// Logging, from util/omc_error.h:
+// void infoStreamPrint(int stream, int indentNext, const char *format, ...)
+// void warningStreamPrint(int stream, int indentNext, const char *format, ...)
+// void (*messageClose)(int stream)
 
-pub struct NonlinearSystemUserData {
-    /// Pointer to data of C type `DATA*`
-    data: *mut c_void,
-    /// Pointer to thread data of C type `threadData_t*`
-    thread_data: *mut c_void,
-
-    /// System index
-    sys_number: u32,
-    /// Pointer to nonlinear system data of type `NONLINEAR_SYSTEM_DATA*`
-    nls_data: *mut c_void,
-    /// Analytic Jacobian
-    pub analytic_jacobian: Jacobian,
-
-    /// Optional pointer to ODE solver data of C type `void*`.
-    /// Used in NLS solving of ODE integrator step.
-    solver_data: *mut c_void,
-}
+// Timers, from util/rtclock.h:
+// void rt_ext_tp_tick(rtclock_t* tick_tp)
+// double rt_ext_tp_tock(rtclock_t* tick_tp)
