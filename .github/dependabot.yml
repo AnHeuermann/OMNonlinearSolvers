@@ -1,0 +1,21 @@
+version: 2
+updates:
+  # One pull request per quarter that collects all GitHub Actions updates.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "quarterly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  # One pull request per quarter that collects all Rust crate updates.
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "quarterly"
+    groups:
+      cargo:
+        patterns:
+          - "*"
