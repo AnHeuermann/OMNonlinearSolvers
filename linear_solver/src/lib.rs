@@ -25,6 +25,9 @@
  *
  */
 
-// static int newtonLimitCycleStep(double *hist, int *nHist, double e)
+// int linearSolverWrapper(DATA *data, int n, double* x, double* A, int* indRow, int* indCol, int *pos, int *rank, int method, int casualTearingSet)
 
-// static int newtonAlgorithm(DATA_HOMOTOPY* solverData, double* x)
+// int solveSystemWithTotalPivotSearch(DATA *data, int n, double* x, double* A, int* indRow, int* indCol, int *pos, int *rank, int casualTearingSet)
+
+mod permuted_matrix;
+mod total_pivot_search;

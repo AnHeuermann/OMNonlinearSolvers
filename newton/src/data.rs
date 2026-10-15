@@ -24,10 +24,3 @@
  * OSMC-PL.
  *
  */
-
-use homotopy_core::data::homotopy_data::allocate_homotopy_data;
-
-#[test]
-fn alloc_homotopy_solver() {
-    let _data = allocate_homotopy_data(10, None);
-}

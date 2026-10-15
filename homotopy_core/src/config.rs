@@ -25,14 +25,14 @@
  *
  */
 
-pub struct Config {
-    pub newton_x_tol: f64,
-    pub newton_f_tol: f64,
-    pub tau_start: f64,
-    pub backtrace_strategy: u32,
+pub(crate) struct Config {
+    pub(crate) newton_x_tol: f64,
+    pub(crate) newton_f_tol: f64,
+    pub(crate) tau_start: f64,
+    pub(crate) backtrace_strategy: u32,
 }
 
-pub static CONFIGURATION: Config = Config {
+pub(crate) static CONFIGURATION: Config = Config {
     newton_x_tol: 1e-12,
     newton_f_tol: 1e-12,
     tau_start: 0.2,

@@ -28,5 +28,5 @@
 use crate::data::jacobian_data::Jacobian;
 
 pub struct NonlinearSystemUserData {
-    pub analytic_jacobian: Jacobian,
+    pub(crate) analytic_jacobian: Jacobian,
 }

@@ -1,0 +1,9 @@
+[package]
+name = "newton"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+linear_solver = { path = "../linear_solver" }
+log = "0.4.34"

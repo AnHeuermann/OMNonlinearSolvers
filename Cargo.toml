@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["homotopy_core", "homotopy_capi"]
+members = ["linear_solver", "newton", "homotopy_core", "homotopy_capi"]
 
 [workspace.package]
 version = "0.1.0"

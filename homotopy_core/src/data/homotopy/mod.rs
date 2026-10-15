@@ -94,25 +94,14 @@ pub struct DataHomotopy {
     /// Number of function evaluations over the whole simulation time
     number_of_function_evaluations: u32,
     /// Maximum allowed number of Newton steps
-    max_number_of_iteartions: u32,
+    pub(crate) max_number_of_iteartions: u32,
 
     // /* strict tearing set or casual tearing set */
     causal_tearing_set: TearingKind, // 0 ==> Strict, 1 ==> Casual
     // int casualTearingSet;
 
     // Newton algorithm
-    x: Box<[f64]>,
-    x0: Box<[f64]>,
-    x_start: Box<[f64]>,
-    x1: Box<[f64]>,
-    finit: Box<[f64]>,
-    fx0: Box<[f64]>,
-    /// n times n Jacobian matrix with additional scaling row at the end in
-    /// column-major format
-    f_jac: Box<[f64]>,
-    /// n times n Jacobian matrix with additional scaling row at the end in
-    /// column-major format
-    f_jacx0: Box<[f64]>,
+    // have a newton-raphson solver
 
     // /* debug arrays */
     // double* debug_fJac;
@@ -146,16 +135,13 @@ pub struct DataHomotopy {
     // int (*h_function)(struct DATA_HOMOTOPY*, double*, double*);
     // int (*hJac_dh)   (struct DATA_HOMOTOPY*, double*, double*);
     user_data: Option<NonlinearSystemUserData>,
-    eq_system_number: Option<u32>,
+    pub(crate) eq_system_number: Option<u32>,
     time_value: Option<f64>,
     mixed_system: Option<bool>,
     // DATA_HYBRD* dataHybrid;
 }
 
-pub fn allocate_homotopy_data(
-    size: u32,
-    user_data: Option<NonlinearSystemUserData>,
-) -> DataHomotopy {
+fn allocate_homotopy_data(size: u32, user_data: Option<NonlinearSystemUserData>) -> DataHomotopy {
     let jac_cols = user_data
         .as_ref()
         .map_or(0, |d| d.analytic_jacobian.size_cols)
@@ -184,15 +170,6 @@ pub fn allocate_homotopy_data(
 
         causal_tearing_set: TearingKind::Unknown,
 
-        x: vec![0.0; (size + 1) as usize].into_boxed_slice(),
-        x0: vec![0.0; (size + 1) as usize].into_boxed_slice(),
-        x_start: vec![0.0; (size + 1) as usize].into_boxed_slice(),
-        x1: vec![0.0; (size + 1) as usize].into_boxed_slice(),
-        finit: vec![0.0; (size + 1) as usize].into_boxed_slice(),
-        fx0: vec![0.0; (size + 1) as usize].into_boxed_slice(),
-        f_jac: vec![0.0; (size * jac_cols) as usize].into_boxed_slice(),
-        f_jacx0: vec![0.0; (size * jac_cols) as usize].into_boxed_slice(),
-
         init_homotopy: false,
         start_direction: Direction::Forward,
         tau: CONFIGURATION.tau_start,
@@ -218,4 +195,9 @@ pub fn allocate_homotopy_data(
         time_value: None,
         mixed_system: None,
     }
+}
+
+#[test]
+fn alloc_homotopy_solver() {
+    let _solver_data = allocate_homotopy_data(10, None);
 }

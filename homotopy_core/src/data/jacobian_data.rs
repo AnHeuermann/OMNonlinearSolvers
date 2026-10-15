@@ -25,6 +25,6 @@
  *
  */
 
-pub struct Jacobian {
-    pub size_cols: u32,
+pub(crate) struct Jacobian {
+    pub(crate) size_cols: u32,
 }

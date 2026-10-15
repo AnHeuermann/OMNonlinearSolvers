@@ -25,7 +25,7 @@
  *
  */
 
-pub mod homotopy_data;
+pub mod homotopy;
 mod jacobian_data;
 mod nonlinear_system_data;
 mod user_data;

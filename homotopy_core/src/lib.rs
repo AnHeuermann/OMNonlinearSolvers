@@ -29,6 +29,4 @@ mod config;
 pub mod data;
 mod flags;
 mod linear_algebra;
-mod linear_solver;
-mod newton;
 mod print;
