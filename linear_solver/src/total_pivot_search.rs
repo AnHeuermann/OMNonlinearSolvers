@@ -26,6 +26,7 @@
  */
 
 use faer::Mat;
+use permuted_matrix::PermutedMatrix;
 
 /// Gaussian elimination with complete ("total") pivoting
 ///
@@ -100,16 +101,116 @@ mod total_pivot_tests {
     }
 }
 
-struct Position {
+/// Pivot element found by [`pivot_search`]
+struct Pivot {
+    /// Logical row of the pivot element
     row: usize,
+    /// Logical column of the pivot element
     column: usize,
+    /// Absolute value of the pivot element
+    abs_value: f64,
 }
 
-/// Calculate pivot element on permuted matrix.
+/// Find the pivot element for elimination step `stage`.
 ///
-/// At elimination step `step` find the entry with the larges absolute value in the
-/// not yet eliminated part.
-/// Return `position: Position` of pivot element and its absolute value
-fn pivot_search(a: &Mat<f64>, step: usize) -> (Position, f64) {
-    return (Position { row: 0, column: 0 }, 0.0);
+/// Searches the not yet eliminated part of `mat`, logical rows and columns
+/// `stage..`, for the entry with the largest absolute value. Rows are searched
+/// one after another, and an entry only replaces the current candidate if it
+/// is strictly larger, so on ties the first entry found wins, starting with
+/// the diagonal entry `(stage, stage)`. This matches
+/// `getIndicesOfPivotElement` of the C runtime.
+///
+/// Returns the [`Pivot`] with the logical position of the entry in `mat` and
+/// its absolute value. An absolute value below `f64::EPSILON` means the
+/// remaining part is (numerically) zero and the matrix is rank-deficient.
+///
+/// # Panics
+///
+/// Panics if `stage` is not a valid row and column index of `mat`.
+fn pivot_search(mat: &PermutedMatrix<f64>, stage: usize) -> Pivot {
+    let mut max_abs_value = mat[(stage, stage)].abs();
+    let mut col_index = stage;
+    let mut row_index = stage;
+
+    for row in stage..mat.nrows() {
+        for col in stage..mat.ncols() {
+            let current_abs_value = mat[(row, col)].abs();
+            if (current_abs_value > max_abs_value) {
+                max_abs_value = current_abs_value;
+                col_index = col;
+                row_index = row;
+            }
+        }
+    }
+
+    return Pivot {
+        row: row_index,
+        column: col_index,
+        abs_value: max_abs_value,
+    };
+}
+
+#[cfg(test)]
+mod pivot_search_tests {
+    use super::*;
+    use faer::mat;
+
+    /// Run `pivot_search` and return `(row, column, abs_max)`
+    fn search(m: &PermutedMatrix<f64>, stage: usize) -> (usize, usize, f64) {
+        let pivot = pivot_search(m, stage);
+        (pivot.row, pivot.column, pivot.abs_value)
+    }
+
+    #[test]
+    fn largest_absolute_value_test() {
+        let mut a = mat![[1.0, -7.0], [3.0, 2.0]];
+        let m = PermutedMatrix::new(&mut a);
+
+        // The largest absolute value is negative
+        assert_eq!(search(&m, 0), (0, 1, 7.0));
+    }
+
+    #[test]
+    fn tie_keeps_first_test() {
+        let mut a = mat![[2.0, 5.0], [5.0, 1.0]];
+        let m = PermutedMatrix::new(&mut a);
+
+        // Row by row, (0, 1) is found before (1, 0). Strict `>` keeps the first.
+        assert_eq!(search(&m, 0), (0, 1, 5.0));
+    }
+
+    #[test]
+    fn diagonal_wins_tie_test() {
+        let mut a = mat![[4.0, -4.0], [4.0, 4.0]];
+        let m = PermutedMatrix::new(&mut a);
+
+        assert_eq!(search(&m, 0), (0, 0, 4.0));
+    }
+
+    #[test]
+    fn zero_matrix_test() {
+        let mut a = mat![[0.0, 0.0], [0.0, 0.0]];
+        let m = PermutedMatrix::new(&mut a);
+
+        assert_eq!(search(&m, 0), (0, 0, 0.0));
+    }
+
+    #[test]
+    fn stage_ignores_eliminated_part_test() {
+        let mut a = mat![[9.0, 8.0, 7.0], [6.0, 1.0, 2.0], [5.0, 3.0, 1.0]];
+        let m = PermutedMatrix::new(&mut a);
+
+        // At stage 1 only rows 1..3 and columns 1..3 are searched
+        assert_eq!(search(&m, 1), (2, 1, 3.0));
+    }
+
+    #[test]
+    fn permuted_matrix_test() {
+        let mut a = mat![[1.0, 2.0], [3.0, 4.0]];
+        let mut m = PermutedMatrix::new(&mut a);
+        m.swap_rows(0, 1);
+
+        // Logical matrix is [[3, 4], [1, 2]], the position is logical too
+        assert_eq!(search(&m, 0), (0, 1, 4.0));
+    }
 }
