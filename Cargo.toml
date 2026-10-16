@@ -10,3 +10,5 @@ license = "BSD-3-Clause OR AGPL-3.0-only OR LicenseRef-OSMC-PL-1.8"
 [workspace.dependencies]
 faer = "=0.24.4"
 log = "0.4.34"
+env_logger = "0.11.11"
+equator = "0.6.0"

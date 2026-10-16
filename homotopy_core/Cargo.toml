@@ -6,8 +6,8 @@ license.workspace = true
 
 [dependencies]
 total_pivot_solver = { path = "../total_pivot_solver" }
-log = "0.4.34"
+log.workspace = true
 newton = { path = "../newton" }
 
 [dev-dependencies]
-env_logger = "0.11.11"
+env_logger.workspace = true

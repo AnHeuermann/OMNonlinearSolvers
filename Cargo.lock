@@ -1352,6 +1352,7 @@ dependencies = [
 name = "total_pivot_solver"
 version = "0.1.0"
 dependencies = [
+ "equator 0.6.0",
  "faer",
  "log",
  "permuted_matrix",

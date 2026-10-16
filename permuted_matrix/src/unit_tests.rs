@@ -26,7 +26,8 @@
  */
 
 use super::*;
-use faer::mat;
+use faer::{mat, traits::math_utils::infinity};
+use std::fmt::Display;
 
 #[test]
 fn identity_permutation_test() {
@@ -166,9 +167,62 @@ fn index_mut_test() {
 }
 
 #[test]
+fn diagonal_test() {
+    let mut m = mat![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
+    let mut m_permutation = PermutedMatrix::new(&mut m);
+    m_permutation.swap_columns(0, 2);
+
+    let diag: Vec<f64> = m_permutation.diagonal().copied().collect();
+    assert_eq!(diag, [3.0, 5.0]);
+}
+
+#[test]
+fn row_test() {
+    let mut m = mat![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
+    let mut m_permutation = PermutedMatrix::new(&mut m);
+    m_permutation.swap_columns(0, 2);
+    m_permutation.swap_rows(0, 1);
+
+    let diag: Vec<f64> = m_permutation.row(1).copied().collect();
+    assert_eq!(diag, [3.0, 2.0, 1.0]);
+}
+
+#[test]
+fn fmt_display_test() {
+    let mut m = mat![[1.5, 2.0], [1. / 3., f64::NAN], [-f64::INFINITY, 6.0]];
+    let mut m_permutation = PermutedMatrix::new(&mut m);
+    m_permutation.swap_columns(1, 0);
+    m_permutation.swap_rows(1, 2);
+
+    let format = format!("{m_permutation:4.2}");
+
+    assert_eq!(
+        "[2.00, 1.50]\n\
+         [6.00, -inf]\n\
+         [ NaN, 0.33]",
+        format
+    );
+}
+
+#[test]
+fn fmt_debug_display_test() {
+    let mut m = mat![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
+    let mut m_permutation = PermutedMatrix::new(&mut m);
+
+    let format = format!("{:?}", m_permutation);
+    assert_eq!(
+        "PermutedMatrix { matrix: [\n\
+        [1.0, 2.0],\n\
+        [3.0, 4.0],\n\
+        [5.0, 6.0],\n\
+        ], row_permutation: [0, 1, 2], column_permutation: [0, 1] }",
+        format
+    )
+}
+
+#[test]
 fn to_mat_keeps_original_test() {
     let mut m = mat![[1.0, 2.0], [3.0, 4.0]];
-
     let mut m_permutation = PermutedMatrix::new(&mut m);
 
     m_permutation.swap_rows(0, 1);
@@ -184,7 +238,6 @@ fn to_mat_keeps_original_test() {
 #[should_panic]
 fn index_row_out_of_bounds_test() {
     let mut m = mat![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
-
     let m_permutation = PermutedMatrix::new(&mut m);
 
     let _ = m_permutation[(2, 0)];

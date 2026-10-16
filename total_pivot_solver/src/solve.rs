@@ -25,7 +25,7 @@
  *
  */
 
-use faer::Mat;
+use faer::{Mat, diag};
 use log::{trace, warn};
 use permuted_matrix::PermutedMatrix;
 
@@ -38,6 +38,8 @@ use crate::pivot_search::pivot_search;
 /// A · x = 0,   with one entry of x fixed to 1
 /// ```
 /// where `A` is a `n×(n+1)` column-major matrix, `x` a vector of size `n+1`.
+///
+/// From C function `solveSystemWithTotalPivotSearch`.
 fn solve(matrix: &mut Mat<f64>, pos: Option<usize>) {
     let n_rows = matrix.nrows(); // n
     let n_cols = matrix.ncols(); // n+1
@@ -47,9 +49,7 @@ fn solve(matrix: &mut Mat<f64>, pos: Option<usize>) {
         pos.unwrap_or(0) <= n_cols,
         "Position argument `pos` out of range!"
     );
-
-    // Assume full rank of matrix unless proven otherwise
-    let mut rank = n_rows;
+    assert!(matrix.is_all_finite(), "Matrix has infinite or NaN values!");
 
     let mut matrix = PermutedMatrix::new(matrix);
 
@@ -59,24 +59,15 @@ fn solve(matrix: &mut Mat<f64>, pos: Option<usize>) {
         matrix.swap_columns(n_rows, pos);
     }
 
-    for stage in 0..n_rows {
-        let pivot = pivot_search(&matrix, stage);
-
-        if pivot.abs_value < f64::EPSILON {
-            rank = stage;
-            warn!(target: "NLS", "Matrix (nearly) singular. Continuing anyway.");
-            trace!(target: "NLS", "rank = {rank}");
-            trace!(target: "NLS", "position = {:?}", pos);
-            break;
-        }
-
-        // Swap
-        matrix.swap_rows(stage, pivot.row);
-        matrix.swap_columns(stage, pivot.column);
-
-        // Gauss elimination
-        eliminate_below_pivot(&mut matrix, stage);
+    let rank = forward_elimination(&mut matrix);
+    if rank < n_rows {
+        warn!(target: "NLS", "Matrix (nearly) singular. Continuing anyway.");
+        trace!(target: "NLS", "rank = {rank}");
+        trace!(target: "NLS", "position = {:?}", pos);
     }
+    trace!(target: "NLS", "Linear System Matrix after forward elimination:\n{0}", matrix);
+
+    let determinant_abs = matrix.diagonal().product::<f64>().abs();
 
     // return position_larges_value;
 }
@@ -134,9 +125,50 @@ mod total_pivot_tests {
 
         solve(&mut matrix, Some(3));
     }
+
+    #[test]
+    #[should_panic = "Matrix has infinite or NaN values!"]
+    /// A matrix with NaN should fail with a clear error message
+    fn nan_test() {
+        let mut m = mat![
+            [0.0, 1.0, 0.0, -1.0],
+            [1.0, 0.0, 0.0, f64::NAN],
+            [0.0, 1.0, 4.0, -3.0]
+        ];
+
+        solve(&mut m, Some(3));
+
+        print!("{:#?}", m);
+    }
 }
 
-/// "Forward elimination step
+/// Forward elimination with complete pivoting
+///
+/// Returning rank of `matrix`.
+fn forward_elimination(matrix: &mut PermutedMatrix<f64>) -> usize {
+    let n_rows = matrix.nrows(); // n
+    let mut rank: usize = n_rows;
+
+    for stage in 0..n_rows {
+        let pivot = pivot_search(&matrix, stage);
+
+        if pivot.abs_value < f64::EPSILON {
+            rank = stage;
+            break;
+        }
+
+        // Swap
+        matrix.swap_rows(stage, pivot.row);
+        matrix.swap_columns(stage, pivot.column);
+
+        // Gauss elimination
+        eliminate_below_pivot(&mut *matrix, stage);
+    }
+
+    rank
+}
+
+/// Single forward elimination step
 ///
 /// Eliminates the entries below the pivot `(i,i)` by subtracting multiples of
 /// row `i`.
@@ -153,9 +185,11 @@ fn eliminate_below_pivot(matrix: &mut PermutedMatrix<f64>, i: usize) {
 }
 
 #[cfg(test)]
-mod elimination_step_tests {
+mod forward_elimination_tests {
     use super::*;
+    use equator::assert;
     use faer::mat;
+    use faer::utils::approx::{ApproxEq, CwiseMat};
 
     use permuted_matrix::PermutedMatrix;
 
@@ -190,5 +224,54 @@ mod elimination_step_tests {
         // Step 2: no rows below row 2, nothing changes
         eliminate_below_pivot(&mut p, 2);
         assert_eq!(p.to_mat(), expected_result, "Wrong result after step 2");
+    }
+
+    #[test]
+    /// Forward elimination of
+    /// ```text
+    /// 0·x₁ + 2·x₂ + 0·x₃ = 4
+    /// 3·x₁ + 0·x₂ + 1·x₃ = 6
+    /// 0·x₁ + 1·x₂ + 4·x₃ = 14
+    /// ```
+    /// with the last column `-b`. All four columns are pivot candidates, as in
+    /// the C implementation with `pos = -1`.
+    ///
+    /// | Stage | Pivot                   | Swaps                     |
+    /// |-------|-------------------------|---------------------------|
+    /// | 0     | `-14` at `(2, 3)`       | rows 0 ↔ 2, columns 0 ↔ 3 |
+    /// | 1     | `3` at logical `(1, 1)` | none                      |
+    /// | 2     | `12/7` at `(2, 2)`      | none                      |
+    ///
+    /// The result is upper triangular in logical order:
+    /// ```text
+    /// [ -14   0     1     4  ]
+    /// [   0   3   -3/7  -5/7 ]
+    /// [   0   0   12/7  -8/7 ]
+    /// ```
+    fn forward_elimination_test() {
+        let mut m = mat![
+            [0.0, 2.0, 0.0, -4.0],
+            [3.0, 0.0, 1.0, -6.0],
+            [0.0, 1.0, 4.0, -14.0]
+        ];
+        let mut p = PermutedMatrix::new(&mut m);
+
+        let rank = forward_elimination(&mut p);
+
+        assert_eq!(rank, 3, "Wrong rank");
+        assert_eq!(p.row_permutation(), &[2, 1, 0], "Wrong row permutation");
+        assert_eq!(
+            p.column_permutation(),
+            &[3, 0, 1, 2],
+            "Wrong column permutation"
+        );
+
+        let expected_result = mat![
+            [-14.0, 0.0, 1.0, 4.0],
+            [0.0, 3.0, -3.0 / 7.0, -5.0 / 7.0],
+            [0.0, 0.0, 12.0 / 7.0, -8.0 / 7.0]
+        ];
+        let approx_eq = CwiseMat(ApproxEq::eps());
+        assert!(p.to_mat() ~ expected_result);
     }
 }

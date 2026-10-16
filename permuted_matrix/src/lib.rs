@@ -32,7 +32,9 @@
 //! their logical (permuted) position with `m[(i, j)]`, which reads or writes
 //! the physical position `(row_permutation[i], column_permutation[j])`.
 //! [`PermutedMatrix::to_mat`] creates a new matrix with the permutations
-//! applied.
+//! applied, [`PermutedMatrix::row`], [`PermutedMatrix::row_iter`] and
+//! [`PermutedMatrix::diagonal`] iterate over elements in logical order, and
+//! the `Display` implementation prints the logical matrix.
 //!
 //! This is useful for algorithms like Gaussian elimination with complete
 //! pivoting, which swap rows and columns in every step.
@@ -57,18 +59,34 @@
 //! assert_eq!(m, mat![[1.0, 2.0, 3.0], [4.0, 5.0, 10.0]]);
 //! ```
 
+use std::fmt::{self, Formatter};
+use std::{iter::Iterator, path::Iter};
+
 use faer::Mat;
 use std::ops::{Index, IndexMut};
 
-/// View of a borrowed matrix with permuted rows and columns
+/// View of a borrowed matrix with permuted rows and columns.
+///
+/// All positions in the methods of this type are logical positions, see the
+/// [crate documentation](crate). The `Debug` output shows the internal state,
+/// the physical matrix and both permutations, while `Display` shows the
+/// logical matrix.
+#[derive(Debug)]
 pub struct PermutedMatrix<'a, T> {
+    /// Borrowed matrix, its memory layout is never changed by the view
     matrix: &'a mut Mat<T>,
+    /// Physical row of each logical row
     row_permutation: Box<[usize]>,
+    /// Physical column of each logical column
     column_permutation: Box<[usize]>,
 }
 
 impl<'a, T> PermutedMatrix<'a, T> {
-    /// New permutation from matrix without any permutation
+    /// Creates a view of `matrix` without any permutation, logical and
+    /// physical positions are the same.
+    ///
+    /// The matrix stays borrowed while the view exists. Writes through the
+    /// view change `matrix`, the data is never copied.
     pub fn new(matrix: &'a mut Mat<T>) -> Self {
         let nrows = matrix.nrows();
         let ncols = matrix.ncols();
@@ -79,27 +97,68 @@ impl<'a, T> PermutedMatrix<'a, T> {
         }
     }
 
-    /// Return the number of rows of the matrix
+    /// Returns the number of rows of the matrix.
     pub fn nrows(&self) -> usize {
         self.matrix.nrows()
     }
 
-    /// Return the number of columns of the matrix
+    /// Returns the number of columns of the matrix.
     pub fn ncols(&self) -> usize {
         self.matrix.ncols()
     }
 
-    /// Get row permutation
+    /// Returns the row permutation.
+    ///
+    /// Entry `i` is the physical row of logical row `i`.
     pub fn row_permutation(&self) -> &[usize] {
         &self.row_permutation
     }
 
-    /// Get column permutation
+    /// Returns the column permutation.
+    ///
+    /// Entry `j` is the physical column of logical column `j`. Use it to map
+    /// results computed in logical order back to the original columns, for
+    /// example the entries of a solution vector.
     pub fn column_permutation(&self) -> &[usize] {
         &self.column_permutation
     }
 
-    /// Apply permutation and return permuted matrix
+    /// Returns an iterator over the logical diagonal, the elements at
+    /// `(k, k)` for `k` in `0..min(nrows, ncols)`.
+    ///
+    /// This is not the physical diagonal of the borrowed matrix, unless no
+    /// rows or columns were swapped.
+    pub fn diagonal(&self) -> impl DoubleEndedIterator<Item = &T> + ExactSizeIterator<Item = &T> {
+        let ndiag = self.matrix.ncols().min(self.matrix.nrows());
+        (0..ndiag).map(move |i| &self[(i, i)])
+    }
+
+    /// Returns an iterator over the elements of logical row `i`, from the
+    /// first to the last logical column.
+    ///
+    /// # Panics
+    ///
+    /// Panics while iterating if `i` is not smaller than [`Self::nrows`].
+    pub fn row(
+        &self,
+        i: usize,
+    ) -> impl DoubleEndedIterator<Item = &T> + ExactSizeIterator<Item = &T> {
+        (0..self.matrix.ncols()).map(move |j| &self[(i, j)])
+    }
+
+    /// Returns an iterator over all logical rows, each one an iterator over
+    /// its elements as returned by [`Self::row`].
+    pub fn row_iter(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = impl DoubleEndedIterator<Item = &T>>
+    + ExactSizeIterator<Item = impl ExactSizeIterator<Item = &T>> {
+        (0..self.matrix.nrows()).map(move |i| self.row(i))
+    }
+
+    /// Returns a new matrix with the permutations applied, its element
+    /// `(i, j)` is the logical element `(i, j)` of the view.
+    ///
+    /// The borrowed matrix is not changed.
     pub fn to_mat(&self) -> Mat<T>
     where
         T: Clone,
@@ -109,17 +168,67 @@ impl<'a, T> PermutedMatrix<'a, T> {
         })
     }
 
-    /// Switch row a with b
+    /// Swaps logical rows `a` and `b`.
+    ///
+    /// Only the row permutation changes, the data of the matrix doesn't move.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `a` or `b` is not smaller than [`Self::nrows`].
     pub fn swap_rows(&mut self, a: usize, b: usize) {
         self.row_permutation.swap(a, b);
     }
 
-    /// Switch column a with b
+    /// Swaps logical columns `a` and `b`.
+    ///
+    /// Only the column permutation changes, the data of the matrix doesn't
+    /// move.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `a` or `b` is not smaller than [`Self::ncols`].
     pub fn swap_columns(&mut self, a: usize, b: usize) {
         self.column_permutation.swap(a, b);
     }
+
+    /// Write the logical (permuted) matrix to `f`, formatting each element
+    /// with `fmt_elem`.
+    ///
+    /// Each row is written on its own line as `[a, b, c]`, without a trailing
+    /// newline after the last row. Used by the `Display` implementation, which
+    /// passes `fmt::Display::fmt` as `fmt_elem`.
+    ///
+    /// `fmt_elem` receives the same formatter `f`, so formatting options of
+    /// the caller, like width and precision in `{:8.3}`, apply to every
+    /// element.
+    fn fmt_with(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        fmt_elem: impl Fn(&T, &mut fmt::Formatter<'_>) -> fmt::Result,
+    ) -> fmt::Result {
+        for (i, row) in self.row_iter().enumerate() {
+            if i > 0 {
+                write!(f, "\n")?;
+            }
+            write!(f, "[")?;
+            for (j, val) in row.enumerate() {
+                if j > 0 {
+                    write!(f, ", ")?;
+                }
+                fmt_elem(val, f)?;
+            }
+            write!(f, "]")?;
+        }
+
+        Ok(())
+    }
 }
 
+/// Read access to the logical element `(i, j)`.
+///
+/// # Panics
+///
+/// Panics if `i` or `j` is out of bounds.
 impl<'a, T> Index<(usize, usize)> for PermutedMatrix<'a, T> {
     type Output = T;
 
@@ -128,9 +237,30 @@ impl<'a, T> Index<(usize, usize)> for PermutedMatrix<'a, T> {
     }
 }
 
+/// Write access to the logical element `(i, j)`, the write goes to the
+/// physical element `(row_permutation[i], column_permutation[j])`.
+///
+/// # Panics
+///
+/// Panics if `i` or `j` is out of bounds.
 impl<'a, T> IndexMut<(usize, usize)> for PermutedMatrix<'a, T> {
     fn index_mut(&mut self, (i, j): (usize, usize)) -> &mut Self::Output {
         &mut self.matrix[(self.row_permutation[i], self.column_permutation[j])]
+    }
+}
+
+/// Prints the logical matrix, one row per line, like
+///
+/// ```text
+/// [6, 5, 4]
+/// [3, 2, 1]
+/// ```
+///
+/// Formatting options apply to every element, `{:.2}` prints all elements
+/// with two decimals.
+impl<'a, T: fmt::Display> fmt::Display for PermutedMatrix<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.fmt_with(f, fmt::Display::fmt)
     }
 }
 

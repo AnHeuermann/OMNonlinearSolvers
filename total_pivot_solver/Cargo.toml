@@ -8,3 +8,6 @@ license.workspace = true
 faer.workspace = true
 log.workspace = true
 permuted_matrix = { path = "../permuted_matrix" }
+
+[dev-dependencies]
+equator.workspace = true
