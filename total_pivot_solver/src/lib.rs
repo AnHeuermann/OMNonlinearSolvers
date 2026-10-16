@@ -25,13 +25,29 @@
  *
  */
 
+//! Linear solver with complete ("total") pivoting for the homotopy and Newton
+//! solvers.
+//!
+//! Port of `solveSystemWithTotalPivotSearch` from the OpenModelica C runtime
+//! (`nonlinearSolverHomotopy.c`). It solves `A·x = 0` for an `n×(n+1)` matrix
+//! `A` with one entry of `x` fixed to 1. With the last column fixed this is the
+//! ordinary system `J·x = -b`; letting the solver choose the fixed column
+//! computes the tangent of a homotopy path.
+
 // int linearSolverWrapper(DATA *data, int n, double* x, double* A, int* indRow, int* indCol, int *pos, int *rank, int method, int casualTearingSet)
 
 // int solveSystemWithTotalPivotSearch(DATA *data, int n, double* x, double* A, int* indRow, int* indCol, int *pos, int *rank, int casualTearingSet)
 
+/// Back substitution on the eliminated matrix
+mod backward_elimination;
+/// Forward elimination with complete pivoting
+mod forward_elimination;
+/// Search for the pivot element of one elimination step
 mod pivot_search;
+/// Solving the linear system, the public entry point
 mod solve;
 
+pub use solve::{Solution, SolveError, SolveStatus, solve};
 /// Pivot element found by [`pivot_search`]
 struct Pivot {
     /// Logical row of the pivot element

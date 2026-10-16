@@ -25,11 +25,58 @@
  *
  */
 
-use faer::{Mat, diag};
-use log::{trace, warn};
+use faer::Mat;
+use log::{error, trace, warn};
 use permuted_matrix::PermutedMatrix;
 
-use crate::pivot_search::pivot_search;
+use crate::backward_elimination::backward_elimination;
+use crate::forward_elimination::forward_elimination;
+
+/// Result of a successful [`solve`].
+#[derive(Debug)]
+pub struct Solution {
+    /// Solution, `n+1` entries, the entry at `fixed_column` is 1
+    pub x: Box<[f64]>,
+    /// Numerical rank of the matrix, `n` for a regular system
+    pub rank: usize,
+    /// Column of `x` fixed to 1: `pos` if it was given, otherwise the column
+    /// chosen by the solver. The homotopy corrector passes the column chosen
+    /// for the predictor back in as `pos`.
+    pub fixed_column: usize,
+    /// Solver status
+    pub status: SolveStatus,
+}
+
+/// How a successful [`solve`] went.
+///
+/// Both variants come with a usable solution, the caller decides how to treat
+/// a vanishing determinant.
+#[derive(Debug)]
+pub enum SolveStatus {
+    /// The system was solved.
+    /// For a rank-deficient but consistent system the unknowns without a pivot are set to 0.
+    Solved,
+    /// The system was solved.
+    /// But `is_casual_tearing_set` is set and the determinant vanishes (|det| < 1e-9).
+    /// The caller should fail unless the current point already is the solution.
+    SolvedDeterminantZero,
+}
+
+/// Why [`solve`] could not solve the system.
+///
+/// No solution is available in these cases.
+#[derive(Debug)]
+pub enum SolveError {
+    /// The matrix contains NaN or infinite values. Checked before the
+    /// elimination, the C implementation fails later with a NaN determinant.
+    MatrixNoxFinite,
+    /// The determinant is NaN: the product of the pivots overflowed to
+    /// infinity and was multiplied with a zero diagonal entry beyond the rank
+    NanDeterminant,
+    /// The matrix is rank-deficient and the system is inconsistent, a row
+    /// without pivot has a right-hand side larger than `1e-6`
+    UnderDeterminde,
+}
 
 /// Gaussian elimination with complete ("total") pivoting
 ///
@@ -39,239 +86,90 @@ use crate::pivot_search::pivot_search;
 /// ```
 /// where `A` is a `n×(n+1)` column-major matrix, `x` a vector of size `n+1`.
 ///
-/// From C function `solveSystemWithTotalPivotSearch`.
-fn solve(matrix: &mut Mat<f64>, pos: Option<usize>) {
+/// - `pos`: the entry of `x` fixed to 1. `Some(n)` fixes the last column and
+///   solves `J·x = -b` for `A = [J | -b]`. `None` lets the solver choose the
+///   column, the one left over after pivoting, which is returned in
+///   [`Solution::fixed_column`].
+/// - `is_casual_tearing_set`: the system is the casual set of a dynamic
+///   tearing. Only then a vanishing determinant (`|det| < 1e-9`) is reported
+///   as [`SolveStatus::SolvedDeterminantZero`].
+///
+/// From C function `solveSystemWithTotalPivotSearch`. Like C, a rank-deficient
+/// but consistent system is solved with the unknowns without pivot set to 0,
+/// and an overflow of the determinant to infinity is not checked.
+///
+/// # Errors
+///
+/// Returns a [`SolveError`] if `matrix` contains NaN or infinite values, if the
+/// determinant is NaN, or if the system is rank-deficient and inconsistent.
+///
+/// # Panics
+///
+/// Panics if `matrix` is not `n×(n+1)` or `pos` is not a valid column index.
+pub fn solve(
+    matrix: &mut Mat<f64>,
+    pos: Option<usize>,
+    is_casual_tearing_set: bool,
+) -> Result<Solution, SolveError> {
+    let mut status = SolveStatus::Solved;
+
     let n_rows = matrix.nrows(); // n
     let n_cols = matrix.ncols(); // n+1
 
     assert!(n_rows + 1 == n_cols, "Wrong matrix shape {n_rows}x{n_cols}");
     assert!(
-        pos.unwrap_or(0) <= n_cols,
+        pos.unwrap_or(0) < n_cols,
         "Position argument `pos` out of range!"
     );
-    assert!(matrix.is_all_finite(), "Matrix has infinite or NaN values!");
+
+    if !matrix.is_all_finite() {
+        return Err(SolveError::MatrixNoxFinite);
+    }
 
     let mut matrix = PermutedMatrix::new(matrix);
 
-    let mut pivot_element = if pos.is_some() { n_rows } else { n_cols };
+    // The fixed column is no pivot candidate
+    let n_pivot_columns = if pos.is_some() { n_rows } else { n_cols };
 
     if let Some(pos) = pos {
         matrix.swap_columns(n_rows, pos);
     }
 
-    let rank = forward_elimination(&mut matrix);
+    let rank = forward_elimination(&mut matrix, n_pivot_columns);
     if rank < n_rows {
         warn!(target: "NLS", "Matrix (nearly) singular. Continuing anyway.");
         trace!(target: "NLS", "rank = {rank}");
         trace!(target: "NLS", "position = {:?}", pos);
     }
-    trace!(target: "NLS", "Linear System Matrix after forward elimination:\n{0}", matrix);
+    trace!(target: "NLS", "Linear System Matrix after forward elimination:\n{matrix:10.4}");
 
+    // Check determinant for consistency. Like C, an overflow to infinity is not
+    // checked: the solution doesn't depend on the determinant.
     let determinant_abs = matrix.diagonal().product::<f64>().abs();
-
-    // return position_larges_value;
-}
-
-#[cfg(test)]
-mod total_pivot_tests {
-    use super::*;
-    use faer::mat;
-
-    #[test]
-    // #[ignore = "total_pivot_search is not implemented yet"]
-    /// Solve:
-    /// ```text
-    /// 2·x₁ + 1·x₂ = 5
-    /// 1·x₁ + 3·x₂ = 10
-    /// ```
-    ///represented as
-    /// ```text
-    ///        x₁   x₂   last column
-    /// A = [   2    1    -5  ]
-    ///     [   1    3   -10  ]
-    /// ```
-    /// Solution: `x = [1, 3]`, with the fixed last entry `[1, 3, 1]`.
-    fn total_pivot_test_1() {
-        let mut matrix = mat![[2.0, 1.0, -5.0], [1.0, 3.0, -10.0],];
-
-        solve(&mut matrix, Some(2));
+    trace!(target: "NLS", "Determinant = {determinant_abs}");
+    if determinant_abs.is_nan() {
+        error!(target: "NLS", "Jacobian determinant is NaN."); // TODO: Should be printed by caller
+        return Err(SolveError::NanDeterminant);
+    }
+    if determinant_abs < 1e-9 && is_casual_tearing_set {
+        trace!(target: "DT", "The determinant of the casual tearing set is vanishing, let's fail if this is not the solution..."); // TODO: Should be printed by caller
+        status = SolveStatus::SolvedDeterminantZero;
     }
 
-    #[test]
-    #[ignore = "total_pivot_search is not implemented yet"]
-    /// Solve a system with zeros, including on the diagonal:
-    /// ```text
-    /// 0·x₁ + 2·x₂ + 0·x₃ = 4
-    /// 3·x₁ + 0·x₂ + 1·x₃ = 6
-    /// 0·x₁ + 1·x₂ + 4·x₃ = 14
-    /// ```
-    /// represented as
-    /// ```text
-    ///        x₁   x₂   x₃   last column
-    /// A = [   0    2    0    -4  ]
-    ///     [   3    0    1    -6  ]
-    ///     [   0    1    4   -14  ]
-    /// ```
-    /// Solution: `x = [1, 2, 3]`, with the fixed last entry `[1, 2, 3, 1]`.
-    ///
-    /// Without pivoting the first step would divide by `A[0, 0] = 0`. Total
-    /// pivoting starts with the largest entry, `4` at `(2, 2)`.
-    fn total_pivot_test_zeros() {
-        let mut matrix = mat![
-            [0.0, 2.0, 0.0, -4.0],
-            [3.0, 0.0, 1.0, -6.0],
-            [0.0, 1.0, 4.0, -14.0],
-        ];
+    // Solve even singular matrices
+    let x = backward_elimination(&matrix, rank)?;
 
-        solve(&mut matrix, Some(3));
+    if pos.is_none() {
+        trace!(target: "NLS", "Position of largest value = {0}", matrix.column_permutation()[n_rows]);
     }
 
-    #[test]
-    #[should_panic = "Matrix has infinite or NaN values!"]
-    /// A matrix with NaN should fail with a clear error message
-    fn nan_test() {
-        let mut m = mat![
-            [0.0, 1.0, 0.0, -1.0],
-            [1.0, 0.0, 0.0, f64::NAN],
-            [0.0, 1.0, 4.0, -3.0]
-        ];
-
-        solve(&mut m, Some(3));
-
-        print!("{:#?}", m);
-    }
-}
-
-/// Forward elimination with complete pivoting
-///
-/// Returning rank of `matrix`.
-fn forward_elimination(matrix: &mut PermutedMatrix<f64>) -> usize {
-    let n_rows = matrix.nrows(); // n
-    let mut rank: usize = n_rows;
-
-    for stage in 0..n_rows {
-        let pivot = pivot_search(&matrix, stage);
-
-        if pivot.abs_value < f64::EPSILON {
-            rank = stage;
-            break;
-        }
-
-        // Swap
-        matrix.swap_rows(stage, pivot.row);
-        matrix.swap_columns(stage, pivot.column);
-
-        // Gauss elimination
-        eliminate_below_pivot(&mut *matrix, stage);
-    }
-
-    rank
-}
-
-/// Single forward elimination step
-///
-/// Eliminates the entries below the pivot `(i,i)` by subtracting multiples of
-/// row `i`.
-fn eliminate_below_pivot(matrix: &mut PermutedMatrix<f64>, i: usize) {
-    for k in i + 1..matrix.nrows() {
-        let multiplier = -matrix[(k, i)] / matrix[(i, i)];
-
-        for j in i + 1..matrix.ncols() {
-            matrix[(k, j)] = matrix[(k, j)] + multiplier * matrix[(i, j)];
-        }
-
-        matrix[(k, i)] = 0.0;
-    }
-}
-
-#[cfg(test)]
-mod forward_elimination_tests {
-    use super::*;
-    use equator::assert;
-    use faer::mat;
-    use faer::utils::approx::{ApproxEq, CwiseMat};
-
-    use permuted_matrix::PermutedMatrix;
-
-    #[test]
-    /// Example from Wiki: https://en.wikipedia.org/wiki/Gaussian_elimination
-    fn gauss_elimination_test() {
-        let mut m = mat![
-            [1.0, 3.0, 1.0, -9.0],
-            [1.0, 1.0, -1.0, -1.0],
-            [3.0, 11.0, 5.0, -35.0]
-        ];
-        let mut p = PermutedMatrix::new(&mut m);
-
-        // Step 0: subtract 1·row 0 from row 1 and 3·row 0 from row 2
-        let expected_result = mat![
-            [1.0, 3.0, 1.0, -9.0],
-            [0.0, -2.0, -2.0, 8.0],
-            [0.0, 2.0, 2.0, -8.0]
-        ];
-        eliminate_below_pivot(&mut p, 0);
-        assert_eq!(p.to_mat(), expected_result, "Wrong result after step 0");
-
-        // Step 1: add row 1 to row 2, which becomes zero (the matrix has rank 2)
-        let expected_result = mat![
-            [1.0, 3.0, 1.0, -9.0],
-            [0.0, -2.0, -2.0, 8.0],
-            [0.0, 0.0, 0.0, 0.0]
-        ];
-        eliminate_below_pivot(&mut p, 1);
-        assert_eq!(p.to_mat(), expected_result, "Wrong result after step 1");
-
-        // Step 2: no rows below row 2, nothing changes
-        eliminate_below_pivot(&mut p, 2);
-        assert_eq!(p.to_mat(), expected_result, "Wrong result after step 2");
-    }
-
-    #[test]
-    /// Forward elimination of
-    /// ```text
-    /// 0·x₁ + 2·x₂ + 0·x₃ = 4
-    /// 3·x₁ + 0·x₂ + 1·x₃ = 6
-    /// 0·x₁ + 1·x₂ + 4·x₃ = 14
-    /// ```
-    /// with the last column `-b`. All four columns are pivot candidates, as in
-    /// the C implementation with `pos = -1`.
-    ///
-    /// | Stage | Pivot                   | Swaps                     |
-    /// |-------|-------------------------|---------------------------|
-    /// | 0     | `-14` at `(2, 3)`       | rows 0 ↔ 2, columns 0 ↔ 3 |
-    /// | 1     | `3` at logical `(1, 1)` | none                      |
-    /// | 2     | `12/7` at `(2, 2)`      | none                      |
-    ///
-    /// The result is upper triangular in logical order:
-    /// ```text
-    /// [ -14   0     1     4  ]
-    /// [   0   3   -3/7  -5/7 ]
-    /// [   0   0   12/7  -8/7 ]
-    /// ```
-    fn forward_elimination_test() {
-        let mut m = mat![
-            [0.0, 2.0, 0.0, -4.0],
-            [3.0, 0.0, 1.0, -6.0],
-            [0.0, 1.0, 4.0, -14.0]
-        ];
-        let mut p = PermutedMatrix::new(&mut m);
-
-        let rank = forward_elimination(&mut p);
-
-        assert_eq!(rank, 3, "Wrong rank");
-        assert_eq!(p.row_permutation(), &[2, 1, 0], "Wrong row permutation");
-        assert_eq!(
-            p.column_permutation(),
-            &[3, 0, 1, 2],
-            "Wrong column permutation"
-        );
-
-        let expected_result = mat![
-            [-14.0, 0.0, 1.0, 4.0],
-            [0.0, 3.0, -3.0 / 7.0, -5.0 / 7.0],
-            [0.0, 0.0, 12.0 / 7.0, -8.0 / 7.0]
-        ];
-        let approx_eq = CwiseMat(ApproxEq::eps());
-        assert!(p.to_mat() ~ expected_result);
-    }
+    Ok(Solution {
+        x,
+        rank,
+        fixed_column: match pos {
+            None => matrix.column_permutation()[n_rows],
+            Some(p) => p,
+        },
+        status,
+    })
 }

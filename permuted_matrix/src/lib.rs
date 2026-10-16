@@ -59,8 +59,8 @@
 //! assert_eq!(m, mat![[1.0, 2.0, 3.0], [4.0, 5.0, 10.0]]);
 //! ```
 
-use std::fmt::{self, Formatter};
-use std::{iter::Iterator, path::Iter};
+use std::fmt::{self};
+use std::iter::Iterator;
 
 use faer::Mat;
 use std::ops::{Index, IndexMut};
@@ -208,7 +208,7 @@ impl<'a, T> PermutedMatrix<'a, T> {
     ) -> fmt::Result {
         for (i, row) in self.row_iter().enumerate() {
             if i > 0 {
-                write!(f, "\n")?;
+                writeln!(f)?;
             }
             write!(f, "[")?;
             for (j, val) in row.enumerate() {

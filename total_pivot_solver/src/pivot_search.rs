@@ -31,11 +31,14 @@ use crate::Pivot;
 
 /// Find the pivot element for elimination step `stage`.
 ///
-/// Searches the not yet eliminated part of `mat`, logical rows and columns
-/// `stage..`, for the entry with the largest absolute value. Rows are searched
-/// one after another, and an entry only replaces the current candidate if it
-/// is strictly larger, so on ties the first entry found wins, starting with
-/// the diagonal entry `(stage, stage)`. This matches
+/// Searches the not yet eliminated part of `mat`, logical rows `stage..` and
+/// columns `stage..n_pivot_columns`, for the entry with the largest absolute
+/// value. Columns from `n_pivot_columns` on are never chosen, `solve` uses it
+/// to exclude the fixed column.
+///
+/// Rows are searched one after another, and an entry only replaces the
+/// current candidate if it is strictly larger, so on ties the first entry
+/// found wins, starting with the diagonal entry `(stage, stage)`. This matches
 /// `getIndicesOfPivotElement` of the C runtime.
 ///
 /// Returns the [`Pivot`] with the logical position of the entry in `mat` and
@@ -44,14 +47,19 @@ use crate::Pivot;
 ///
 /// # Panics
 ///
-/// Panics if `stage` is not a valid row and column index of `mat`.
-pub(crate) fn pivot_search(mat: &PermutedMatrix<f64>, stage: usize) -> Pivot {
+/// Panics if `stage` is not a valid row and column index of `mat`, or if
+/// `n_pivot_columns` is larger than the number of columns.
+pub(crate) fn pivot_search(
+    mat: &PermutedMatrix<f64>,
+    stage: usize,
+    n_pivot_columns: usize,
+) -> Pivot {
     let mut max_abs_value = mat[(stage, stage)].abs();
     let mut col_index = stage;
     let mut row_index = stage;
 
     for row in stage..mat.nrows() {
-        for col in stage..mat.ncols() {
+        for col in stage..n_pivot_columns {
             let current_abs_value = mat[(row, col)].abs();
             if current_abs_value > max_abs_value {
                 max_abs_value = current_abs_value;
@@ -61,11 +69,11 @@ pub(crate) fn pivot_search(mat: &PermutedMatrix<f64>, stage: usize) -> Pivot {
         }
     }
 
-    return Pivot {
+    Pivot {
         row: row_index,
         column: col_index,
         abs_value: max_abs_value,
-    };
+    }
 }
 
 #[cfg(test)]
@@ -75,7 +83,7 @@ mod pivot_search_tests {
 
     /// Run `pivot_search` and return `(row, column, abs_max)`
     fn search(m: &PermutedMatrix<f64>, stage: usize) -> (usize, usize, f64) {
-        let pivot = pivot_search(m, stage);
+        let pivot = pivot_search(m, stage, m.ncols());
         (pivot.row, pivot.column, pivot.abs_value)
     }
 
@@ -130,5 +138,33 @@ mod pivot_search_tests {
 
         // Logical matrix is [[3, 4], [1, 2]], the position is logical too
         assert_eq!(search(&m, 0), (0, 1, 4.0));
+    }
+
+    #[test]
+    /// `n_pivot_columns` limits the searched columns to `stage..n_pivot_columns`.
+    ///
+    /// For `[J | -b]` the right-hand side `-b` in the last column holds the
+    /// largest entry. It is only a pivot candidate if all `n+1` columns are
+    /// searched (`pos = None`), not if the last column is the fixed one.
+    fn n_pivot_columns_limits_columns_test() {
+        let mut a = mat![[2.0, 1.0, -5.0], [1.0, 3.0, -10.0]];
+        let m = PermutedMatrix::new(&mut a);
+
+        // All 3 columns: the -10 of the right-hand side wins
+        let pivot = pivot_search(&m, 0, 3);
+        assert_eq!((pivot.row, pivot.column, pivot.abs_value), (1, 2, 10.0));
+
+        // Last column excluded: the largest entry of J
+        let pivot = pivot_search(&m, 0, 2);
+        assert_eq!((pivot.row, pivot.column, pivot.abs_value), (1, 1, 3.0));
+
+        // Only column 0 left: the diagonal entry is the start candidate and
+        // the largest entry of that column
+        let pivot = pivot_search(&m, 0, 1);
+        assert_eq!((pivot.row, pivot.column, pivot.abs_value), (0, 0, 2.0));
+
+        // At stage 1 with 2 columns only the single entry (1, 1) remains
+        let pivot = pivot_search(&m, 1, 2);
+        assert_eq!((pivot.row, pivot.column, pivot.abs_value), (1, 1, 3.0));
     }
 }
