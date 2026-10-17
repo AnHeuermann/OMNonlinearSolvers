@@ -10,4 +10,5 @@ license.workspace = true
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
+nls_model = { path = "../nls_model" }
 homotopy_core = { path = "../homotopy_core" }

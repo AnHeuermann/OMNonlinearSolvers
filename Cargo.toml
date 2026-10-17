@@ -1,6 +1,13 @@
 [workspace]
 resolver = "3"
-members = ["permuted_matrix", "total_pivot_solver", "newton", "homotopy_core", "homotopy_capi"]
+members = [
+    "nls_model",
+    "permuted_matrix",
+    "total_pivot_solver",
+    "newton",
+    "homotopy_core",
+    "homotopy_capi",
+]
 
 [workspace.package]
 version = "0.1.0"

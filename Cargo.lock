@@ -579,6 +579,7 @@ name = "homotopy_capi"
 version = "0.1.0"
 dependencies = [
  "homotopy_core",
+ "nls_model",
 ]
 
 [[package]]
@@ -588,6 +589,7 @@ dependencies = [
  "env_logger",
  "log",
  "newton",
+ "nls_model",
  "total_pivot_solver",
 ]
 
@@ -771,8 +773,13 @@ dependencies = [
 name = "newton"
 version = "0.1.0"
 dependencies = [
+ "nls_model",
  "total_pivot_solver",
 ]
+
+[[package]]
+name = "nls_model"
+version = "0.1.0"
 
 [[package]]
 name = "npyz"
