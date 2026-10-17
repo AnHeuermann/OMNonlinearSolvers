@@ -5,3 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+faer.workspace = true
+
+[dev-dependencies]
+equator.workspace = true

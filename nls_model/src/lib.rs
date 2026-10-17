@@ -31,3 +31,17 @@
 //! it. The model the solvers work on, the residual `F(x)` and its Jacobian,
 //! is defined here, so Newton, the homotopy and other solvers can use the same
 //! interface, and the C interface or a test can implement it.
+
+/// [`ClosureModel`], a model built from a closure
+mod closure_model;
+/// The [`ModelFunctions`] trait and [`EvalError`]
+mod model_functions;
+/// [`SystemInfo`], the facts about a system
+mod system_info;
+
+pub use closure_model::ClosureModel;
+pub use model_functions::{EvalError, ModelFunctions};
+pub use system_info::SystemInfo;
+
+#[cfg(test)]
+mod unit_tests;

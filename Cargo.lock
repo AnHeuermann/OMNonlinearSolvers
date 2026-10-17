@@ -780,6 +780,10 @@ dependencies = [
 [[package]]
 name = "nls_model"
 version = "0.1.0"
+dependencies = [
+ "equator 0.6.0",
+ "faer",
+]
 
 [[package]]
 name = "npyz"
