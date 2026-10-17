@@ -94,7 +94,7 @@ mod backward_elimination_tests {
             [0.0, -2.0, -2.0, 8.0],
             [0.0, 0.0, 1.0, 2.0]
         ];
-        let mut p = PermutedMatrix::new(&mut m);
+        let p = PermutedMatrix::new(&mut m);
 
         let x = backward_elimination(&p, 3).unwrap();
 

@@ -25,6 +25,9 @@
  *
  */
 
+// TODO: Remove once the port is complete
+#![allow(dead_code, unused_variables)]
+
 mod config;
 pub mod data;
 mod flags;

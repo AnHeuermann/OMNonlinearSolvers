@@ -26,8 +26,7 @@
  */
 
 use super::*;
-use faer::{mat, traits::math_utils::infinity};
-use std::fmt::Display;
+use faer::mat;
 
 #[test]
 fn identity_permutation_test() {
@@ -207,7 +206,7 @@ fn fmt_display_test() {
 #[test]
 fn fmt_debug_display_test() {
     let mut m = mat![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
-    let mut m_permutation = PermutedMatrix::new(&mut m);
+    let m_permutation = PermutedMatrix::new(&mut m);
 
     let format = format!("{:?}", m_permutation);
     assert_eq!(

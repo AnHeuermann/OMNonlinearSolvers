@@ -37,11 +37,12 @@ cargo test
 
 ## Formatting and Linting
 
-The code uses the default `rustfmt` style and is checked with Clippy:
+The code uses the default `rustfmt` style and must be free of compiler and
+Clippy warnings. CI fails on any warning, check locally with:
 
 ```sh
 cargo fmt
-cargo clippy --all-targets
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 ## License Headers
@@ -83,8 +84,8 @@ cargo doc --no-deps --document-private-items --open
 ## Continuous Integration
 
 Every pull request and push to `main` runs [ci.yml](.github/workflows/ci.yml),
-which checks the formatting and license headers, builds the crate, runs Clippy
-and the tests, and builds the documentation. The coverage job prints a summary
+which checks the formatting and license headers, runs Clippy with warnings as
+errors, builds the crate, runs the tests, and builds the documentation. The coverage job prints a summary
 on the run's page and uploads the HTML report as the `coverage` artifact.
 
 [cargo-llvm-cov]: https://github.com/taiki-e/cargo-llvm-cov

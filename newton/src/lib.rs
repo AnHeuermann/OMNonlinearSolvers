@@ -25,6 +25,9 @@
  *
  */
 
+// TODO: Remove once the port is complete
+#![allow(dead_code, unused_variables)]
+
 // static int newtonLimitCycleStep(double *hist, int *nHist, double e)
 
 struct NewtonSolver {
