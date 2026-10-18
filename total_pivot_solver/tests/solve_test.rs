@@ -30,6 +30,11 @@ use faer::utils::approx::{ApproxEq, CwiseMat};
 use faer::{ColRef, col, mat};
 use total_pivot_solver::{SolveError, SolveStatus, solve};
 
+/// Equal up to rounding errors, `128·ε` absolute and relative
+fn approx_eq_eps() -> CwiseMat<ApproxEq<f64>> {
+    CwiseMat(ApproxEq::eps())
+}
+
 #[test]
 /// Solve:
 /// ```text
@@ -48,8 +53,7 @@ fn total_pivot_test_1() {
 
     let solution = solve(&mut matrix, Some(2), false).unwrap();
 
-    let approx_eq = CwiseMat(ApproxEq::eps());
-    assert!(ColRef::from_slice(&solution.x) ~ col![1.0, 3.0, 1.0]);
+    assert!(ColRef::from_slice(&solution.x) :approx_eq_eps(): col![1.0, 3.0, 1.0]);
     assert!(solution.rank == 2);
     assert!(solution.fixed_column == 2);
     assert!(matches!(solution.status, SolveStatus::Solved));
@@ -82,8 +86,7 @@ fn total_pivot_test_zeros() {
 
     let solution = solve(&mut matrix, Some(3), false).unwrap();
 
-    let approx_eq = CwiseMat(ApproxEq::eps());
-    assert!(ColRef::from_slice(&solution.x) ~ col![1.0, 2.0, 3.0, 1.0]);
+    assert!(ColRef::from_slice(&solution.x) :approx_eq_eps(): col![1.0, 2.0, 3.0, 1.0]);
     assert!(solution.rank == 3);
     assert!(solution.fixed_column == 3);
     assert!(matches!(solution.status, SolveStatus::Solved));
@@ -110,8 +113,7 @@ fn total_pivot_test_rank_deficient() {
 
     let solution = solve(&mut matrix, Some(3), false).unwrap();
 
-    let approx_eq = CwiseMat(ApproxEq::eps());
-    assert!(ColRef::from_slice(&solution.x) ~ col![0.0, 2.5, 1.5, 1.0]);
+    assert!(ColRef::from_slice(&solution.x) :approx_eq_eps(): col![0.0, 2.5, 1.5, 1.0]);
     assert!(solution.rank == 2);
     assert!(matches!(solution.status, SolveStatus::Solved));
 }
@@ -128,8 +130,7 @@ fn total_pivot_test_rank_deficient_casual() {
 
     let solution = solve(&mut matrix, Some(3), true).unwrap();
 
-    let approx_eq = CwiseMat(ApproxEq::eps());
-    assert!(ColRef::from_slice(&solution.x) ~ col![0.0, 2.5, 1.5, 1.0]);
+    assert!(ColRef::from_slice(&solution.x) :approx_eq_eps(): col![0.0, 2.5, 1.5, 1.0]);
     assert!(matches!(
         solution.status,
         SolveStatus::SolvedDeterminantZero
@@ -170,8 +171,7 @@ fn total_pivot_test_tangent_1x2() {
 
     let solution = solve(&mut matrix, None, false).unwrap();
 
-    let approx_eq = CwiseMat(ApproxEq::eps());
-    assert!(ColRef::from_slice(&solution.x) ~ col![1.0, 0.5]);
+    assert!(ColRef::from_slice(&solution.x) :approx_eq_eps(): col![1.0, 0.5]);
     assert!(solution.fixed_column == 0);
 }
 
@@ -189,8 +189,7 @@ fn total_pivot_test_tangent_2x3() {
 
     let solution = solve(&mut matrix, None, false).unwrap();
 
-    let approx_eq = CwiseMat(ApproxEq::eps());
-    assert!(ColRef::from_slice(&solution.x) ~ col![1.0, -0.8, 0.2]);
+    assert!(ColRef::from_slice(&solution.x) :approx_eq_eps(): col![1.0, -0.8, 0.2]);
     assert!(solution.rank == 2);
     assert!(solution.fixed_column == 0);
 }

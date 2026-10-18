@@ -71,9 +71,10 @@ pub trait ModelFunctions {
     /// column-major matrix.
     ///
     /// The default computes forward differences, one evaluation of `F` per
-    /// column, with the step `h = sqrt(20·ε)·(1 + |xⱼ|)` of the C runtime.
-    /// Unlike the C runtime it doesn't respect the bounds of `x` yet. Systems
-    /// with an analytical Jacobian override it.
+    /// column, with the step `h = sqrt(20·ε)·(1 + |xⱼ|)` of the C runtime. When
+    /// `x+h` reaches maximum bound backwards differences are used instead.
+    ///
+    /// Systems with an analytical Jacobian override it.
     ///
     /// # Errors
     ///
@@ -96,8 +97,14 @@ pub trait ModelFunctions {
         let mut x_tilde = x.to_vec();
 
         for (j, col) in jacobian.col_iter_mut().enumerate() {
-            let h = delta * (1.0 + x[j].abs());
-            x_tilde[j] = x[j] + h;
+            let mut h = delta * (1.0 + x[j].abs());
+
+            // step backwards if x + h would reach the upper bound
+            if x[j] + h >= self.info().max[j] {
+                h *= -1.0;
+            }
+
+            x_tilde[j] += h;
 
             // col := F(x + h·eⱼ)
             let column: &mut [f64] = col.try_as_col_major_mut().unwrap().as_slice_mut();
@@ -112,5 +119,114 @@ pub trait ModelFunctions {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod numeric_jacobian_tests {
+    use super::*;
+    use equator::assert;
+    use faer::utils::approx::{ApproxEq, CwiseMat};
+    use faer::{Mat, mat};
+
+    /// Equal within the accuracy of a forward difference
+    fn approx_eq_fd_tol() -> CwiseMat<ApproxEq<f64>> {
+        CwiseMat(ApproxEq {
+            abs_tol: 1e-6,
+            rel_tol: 1e-6,
+        })
+    }
+
+    /// Evaluate `F(x)` and the numerical Jacobian of `model` at `x`
+    fn jacobian_at(model: &mut impl ModelFunctions, x: &[f64]) -> Result<Mat<f64>, EvalError> {
+        let info = model.info();
+        let mut f_x = vec![0.0; info.num_residuals];
+        let mut jac = Mat::zeros(info.num_residuals, info.num_unknowns);
+        model.eval(x, &mut f_x)?;
+        model.derivative(x, &f_x, jac.as_mut())?;
+        Ok(jac)
+    }
+
+    #[test]
+    /// Evaluate a Jacobian of a non-square system with 2 residuals and 3
+    /// unknowns, shaped like a homotopy `H(x, λ)` with `λ` as additional
+    /// unknown:
+    /// ```text
+    /// H(x, y, λ) = ( x² + y - λ )
+    ///              ( x·y·λ - 2  )
+    /// ```
+    /// at `(x, y, λ) = (1, 2, 1)` and `(2, -1, 0.5)`
+    fn numeric_jacobian_test() {
+        struct H {
+            info: SystemInfo,
+        }
+        impl ModelFunctions for H {
+            fn info(&self) -> &SystemInfo {
+                &self.info
+            }
+
+            fn eval(&mut self, x_vec: &[f64], res: &mut [f64]) -> Result<(), EvalError> {
+                let [x, y, lambda] = [x_vec[0], x_vec[1], x_vec[2]];
+
+                res[0] = x * x + y - lambda;
+                res[1] = x * y * lambda - 2.0;
+                Ok(())
+            }
+        }
+        let mut model = H {
+            info: SystemInfo::new(2, 3),
+        };
+
+        assert!(jacobian_at(&mut model, &[1.0, 2.0, 1.0]).unwrap() :approx_eq_fd_tol(): mat![[2.0, 1.0, -1.0], [2.0, 1.0, 2.0]]);
+        assert!(jacobian_at(&mut model, &[2.0, -1.0, 0.5]).unwrap() :approx_eq_fd_tol(): mat![[4.0, 1.0, -1.0], [-0.5, 1.0, -2.0]]);
+    }
+
+    /// `F: ℝ² → ℝ, (x,y) → x² + y²`,
+    /// `J(x, y) = [2x, 2y]`
+    struct F {
+        info: SystemInfo,
+    }
+    impl ModelFunctions for F {
+        fn info(&self) -> &SystemInfo {
+            &self.info
+        }
+
+        fn eval(&mut self, x_vec: &[f64], res: &mut [f64]) -> Result<(), EvalError> {
+            let [x, y] = [x_vec[0], x_vec[1]];
+            if !(-1.0..=1.0).contains(&x) || !(-1.0..=1.0).contains(&y) {
+                return Err(EvalError::Assert);
+            }
+            res[0] = x.powi(2) + y.powi(2);
+            Ok(())
+        }
+    }
+
+    #[test]
+    /// Test Jacobian evaluation right at upper bound of allowed range.
+    fn numeric_jacobian_bounds_test() {
+        let mut model = F {
+            info: SystemInfo::new(1, 2)
+                .with_min([-1.0, -1.0])
+                .with_max([1.0, 1.0]),
+        };
+        // Test at the bound
+        assert!(jacobian_at(&mut model, &[1.0, 0.0]).unwrap() :approx_eq_fd_tol(): mat![[2.0, 0.0]]);
+        // Test just below the bound
+        assert!(jacobian_at(&mut model, &[0.0, 1.0 - 1e-8]).unwrap() :approx_eq_fd_tol(): mat![[0.0, 2.0]]);
+        // Test at lower bound
+        assert!(jacobian_at(&mut model, &[-1.0, -1.0]).unwrap() :approx_eq_fd_tol(): mat![[-2.0, -2.0]]);
+    }
+
+    #[test]
+    /// Test system missing max bounds triggering assert
+    /// Missing max bounds in `F` must resulting in forward difference used and triggering assert
+    fn numeric_jacobian_bounds_panic_test() {
+        let mut model = F {
+            info: SystemInfo::new(1, 2),
+        };
+
+        // Test just below the bound
+        let result = jacobian_at(&mut model, &[0.0, 1.0 - 1e-8]);
+        assert!(matches!(result, Err(EvalError::Assert)));
     }
 }

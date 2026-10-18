@@ -193,7 +193,7 @@ fn eval_constrained() {
 }
 
 #[test]
-#[should_panic]
+#[should_panic = "`Result::unwrap()` on an `Err` value: Assert"]
 /// Test evaluation of function with division by zero
 fn test_division_by_zero() {
     /// `F(x) = 1/x - 2`

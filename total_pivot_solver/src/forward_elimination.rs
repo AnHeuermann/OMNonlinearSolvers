@@ -86,6 +86,11 @@ mod forward_elimination_tests {
 
     use permuted_matrix::PermutedMatrix;
 
+    /// Equal up to rounding errors, `128·ε` absolute and relative
+    fn approx_eq_eps() -> CwiseMat<ApproxEq<f64>> {
+        CwiseMat(ApproxEq::eps())
+    }
+
     #[test]
     /// Example from Wiki: https://en.wikipedia.org/wiki/Gaussian_elimination
     fn gauss_elimination_test() {
@@ -165,7 +170,6 @@ mod forward_elimination_tests {
             [0.0, 3.0, -3.0 / 7.0, -5.0 / 7.0],
             [0.0, 0.0, 12.0 / 7.0, -8.0 / 7.0]
         ];
-        let approx_eq = CwiseMat(ApproxEq::eps());
-        assert!(p.to_mat() ~ expected_result);
+        assert!(p.to_mat() :approx_eq_eps(): expected_result);
     }
 }

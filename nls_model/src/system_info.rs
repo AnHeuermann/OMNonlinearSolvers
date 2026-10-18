@@ -123,3 +123,37 @@ impl SystemInfo {
         values
     }
 }
+
+#[cfg(test)]
+mod system_info_tests {
+    use super::*;
+
+    #[test]
+    /// `SystemInfo::new` has the defaults: nominal values of 1, no bounds and no
+    /// casual tearing set
+    fn system_info_defaults() {
+        let info = SystemInfo::new(2, 3);
+
+        assert!(info.num_residuals == 2);
+        assert!(info.num_unknowns == 3);
+        assert_eq!(*info.nominal, [1.0; 3]);
+        assert_eq!(*info.min, [f64::NEG_INFINITY; 3]);
+        assert_eq!(*info.max, [f64::INFINITY; 3]);
+        assert!(!info.casual_tearing_set);
+    }
+
+    #[test]
+    /// The `with_*` methods of `SystemInfo` set the values and the tearing kind
+    fn system_info_with() {
+        let info = SystemInfo::new(1, 2)
+            .with_nominal([1.0, 1e3])
+            .with_min([0.0, -1.0])
+            .with_max([1.0, 1.0])
+            .with_casual_tearing_set();
+
+        assert_eq!(*info.nominal, [1.0, 1e3]);
+        assert_eq!(*info.min, [0.0, -1.0]);
+        assert_eq!(*info.max, [1.0, 1.0]);
+        assert!(info.casual_tearing_set);
+    }
+}

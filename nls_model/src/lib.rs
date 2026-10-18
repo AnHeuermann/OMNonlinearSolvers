@@ -42,6 +42,3 @@ mod system_info;
 pub use closure_model::ClosureModel;
 pub use model_functions::{EvalError, ModelFunctions};
 pub use system_info::SystemInfo;
-
-#[cfg(test)]
-mod unit_tests;

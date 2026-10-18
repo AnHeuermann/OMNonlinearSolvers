@@ -87,6 +87,11 @@ mod backward_elimination_tests {
 
     use permuted_matrix::PermutedMatrix;
 
+    /// Equal up to rounding errors, `128·ε` absolute and relative
+    fn approx_eq_eps() -> CwiseMat<ApproxEq<f64>> {
+        CwiseMat(ApproxEq::eps())
+    }
+
     #[test]
     fn backward_elimination_test() {
         let mut m = mat![
@@ -99,8 +104,7 @@ mod backward_elimination_tests {
         let x = backward_elimination(&p, 3).unwrap();
 
         let residual = &m * ColRef::from_slice(&x);
-        let approx_eq = CwiseMat(ApproxEq::eps());
-        assert!(residual ~ Col::<f64>::zeros(3));
+        assert!(residual :approx_eq_eps(): Col::<f64>::zeros(3));
     }
 
     #[test]
@@ -131,8 +135,7 @@ mod backward_elimination_tests {
             [3.0, 11.0, 5.0, -35.0]
         ];
         let residual = &original * ColRef::from_slice(&x);
-        let approx_eq = CwiseMat(ApproxEq::eps());
-        assert!(residual ~ Col::<f64>::zeros(3));
+        assert!(residual :approx_eq_eps(): Col::<f64>::zeros(3));
     }
 
     #[test]
