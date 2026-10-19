@@ -7,3 +7,6 @@ license.workspace = true
 [dependencies]
 nls_model = { path = "../nls_model" }
 total_pivot_solver = { path = "../total_pivot_solver" }
+
+[lints]
+workspace = true

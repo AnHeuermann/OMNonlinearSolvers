@@ -50,7 +50,7 @@ use crate::Pivot;
 /// Panics if `stage` is not a valid row and column index of `mat`, or if
 /// `n_pivot_columns` is larger than the number of columns.
 pub(crate) fn pivot_search(
-    mat: &PermutedMatrix<f64>,
+    mat: &PermutedMatrix<'_, f64>,
     stage: usize,
     n_pivot_columns: usize,
 ) -> Pivot {
@@ -82,7 +82,7 @@ mod pivot_search_tests {
     use faer::mat;
 
     /// Run `pivot_search` and return `(row, column, abs_max)`
-    fn search(m: &PermutedMatrix<f64>, stage: usize) -> (usize, usize, f64) {
+    fn search(m: &PermutedMatrix<'_, f64>, stage: usize) -> (usize, usize, f64) {
         let pivot = pivot_search(m, stage, m.ncols());
         (pivot.row, pivot.column, pivot.abs_value)
     }

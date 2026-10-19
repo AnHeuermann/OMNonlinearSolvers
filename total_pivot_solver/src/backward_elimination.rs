@@ -45,7 +45,7 @@ use permuted_matrix::PermutedMatrix;
 ///
 /// [`forward_elimination`]: crate::forward_elimination::forward_elimination
 pub(crate) fn backward_elimination(
-    matrix: &PermutedMatrix<f64>,
+    matrix: &PermutedMatrix<'_, f64>,
     rank: usize,
 ) -> Result<Box<[f64]>, SolveError> {
     let n_rows = matrix.nrows(); // n

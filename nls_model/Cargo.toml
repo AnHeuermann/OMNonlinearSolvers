@@ -9,3 +9,6 @@ faer.workspace = true
 
 [dev-dependencies]
 equator.workspace = true
+
+[lints]
+workspace = true

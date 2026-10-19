@@ -36,7 +36,7 @@ use permuted_matrix::PermutedMatrix;
 ///
 /// Returns the rank of `matrix`.
 pub(crate) fn forward_elimination(
-    matrix: &mut PermutedMatrix<f64>,
+    matrix: &mut PermutedMatrix<'_, f64>,
     n_pivot_columns: usize,
 ) -> usize {
     let n_rows = matrix.nrows(); // n
@@ -65,7 +65,7 @@ pub(crate) fn forward_elimination(
 ///
 /// Eliminates the entries below the pivot `(i,i)` by subtracting multiples of
 /// row `i`.
-fn eliminate_below_pivot(matrix: &mut PermutedMatrix<f64>, i: usize) {
+fn eliminate_below_pivot(matrix: &mut PermutedMatrix<'_, f64>, i: usize) {
     for k in i + 1..matrix.nrows() {
         let multiplier = -matrix[(k, i)] / matrix[(i, i)];
 

@@ -20,3 +20,7 @@ log = "0.4.34"
 env_logger = "0.11.11"
 equator = "0.6.0"
 testing_logger = "0.1.1"
+
+[workspace.lints.rust]
+# hidden lifetime parameters in types are deprecated
+elided_lifetimes_in_paths = "warn"

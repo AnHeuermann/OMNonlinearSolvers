@@ -36,6 +36,8 @@
 mod closure_model;
 /// The [`ModelFunctions`] trait and [`EvalError`]
 mod model_functions;
+/// Scaling functions for variables, residuals and [`faer::Mat`] matrices
+pub mod scaling;
 /// [`SystemInfo`], the facts about a system
 mod system_info;
 
