@@ -1,8 +1,5 @@
 # TODO
 
-* Use a package for linear algebra, e.g. [nalgebra][nalgebra] (or similar),
-  instead of flat vectors
-* Use boolean or enum for `causal_tearing_set`
 * Split DataHomotopy into multiple structs
   * Newton data
   * Homotopy parameters
@@ -24,6 +21,5 @@
 * `SystemInfo` has public members, so a caller could input wrong values. Add
   getters.
 
-[nalgebra]: https://nalgebra.rs
 [newton_rootfinder]: https://github.com/Nateckert/newton_rootfinder
 [nrfind]: https://github.com/NoraCodes/nrfind

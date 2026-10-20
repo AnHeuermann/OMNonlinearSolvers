@@ -30,7 +30,9 @@ pub mod settings;
 /// Solve with Newton-Raphson algorithm
 mod solve;
 
+mod cubic_interpolation;
 mod error_history;
+mod line_search;
 mod stagnation_tracker;
 
 pub use solve::{NewtonError, NewtonStatus, NewtonWorkspace, solve};
