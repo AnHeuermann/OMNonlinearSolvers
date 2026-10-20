@@ -25,11 +25,5 @@
  *
  */
 
-// TODO: Remove once the port is complete
-#![allow(dead_code, unused_variables)]
-
-mod config;
-pub mod data;
-mod flags;
-mod linear_algebra;
-mod print;
+//! The homotopy algorithm of `nonlinearSolverHomotopy.c`, built on the Newton
+//! solver of the `newton` crate.

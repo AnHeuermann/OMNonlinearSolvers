@@ -25,38 +25,11 @@
  *
  */
 
-// TODO: Remove once the port is complete
-#![allow(dead_code, unused_variables)]
+/// Settings of the Newton-Raphson algorithm
+pub mod settings;
+/// Solve with Newton-Raphson algorithm
+mod solve;
 
-// static int newtonLimitCycleStep(double *hist, int *nHist, double e)
+mod error_history;
 
-struct NewtonSolver {
-    x: Box<[f64]>,
-    x0: Box<[f64]>,
-    x_start: Box<[f64]>,
-    x1: Box<[f64]>,
-    finit: Box<[f64]>,
-    fx0: Box<[f64]>,
-    /// n times n Jacobian matrix with additional scaling row at the end in
-    /// column-major format
-    f_jac: Box<[f64]>,
-    /// n times n Jacobian matrix with additional scaling row at the end in
-    /// column-major format
-    f_jacx0: Box<[f64]>,
-}
-
-impl NewtonSolver {
-    /// Allocate zero-initialized memory for a Newton-Raphson solver
-    fn new(size: u32, jac_cols: u32) -> NewtonSolver {
-        NewtonSolver {
-            x: vec![0.0; (size + 1) as usize].into_boxed_slice(),
-            x0: vec![0.0; (size + 1) as usize].into_boxed_slice(),
-            x_start: vec![0.0; (size + 1) as usize].into_boxed_slice(),
-            x1: vec![0.0; (size + 1) as usize].into_boxed_slice(),
-            finit: vec![0.0; (size + 1) as usize].into_boxed_slice(),
-            fx0: vec![0.0; (size + 1) as usize].into_boxed_slice(),
-            f_jac: vec![0.0; (size * jac_cols) as usize].into_boxed_slice(),
-            f_jacx0: vec![0.0; (size * jac_cols) as usize].into_boxed_slice(),
-        }
-    }
-}
+pub use solve::{NewtonError, NewtonStatus, NewtonWorkspace, solve};

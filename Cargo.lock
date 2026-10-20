@@ -773,6 +773,7 @@ dependencies = [
 name = "newton"
 version = "0.1.0"
 dependencies = [
+ "faer",
  "nls_model",
  "total_pivot_solver",
 ]
