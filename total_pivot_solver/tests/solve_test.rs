@@ -159,7 +159,7 @@ fn total_pivot_test_inconsistent() {
 
     let result = solve(&mut matrix, Some(2), false);
 
-    assert!(matches!(result, Err(SolveError::UnderDeterminde)));
+    assert!(matches!(result, Err(SolveError::UnderDetermined)));
 }
 
 #[test]
@@ -205,5 +205,5 @@ fn nan_test() {
 
     let result = solve(&mut m, Some(3), false);
 
-    assert!(matches!(result, Err(SolveError::MatrixNoxFinite)));
+    assert!(matches!(result, Err(SolveError::MatrixNotFinite)));
 }

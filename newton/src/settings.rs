@@ -50,14 +50,14 @@ const MAX_ITERATIONS_DEFAULT: usize = 100;
 /// let settings = Settings::new(3).with_f_tol(1e-10).with_maximum_iterations(50);
 /// ```
 pub struct Settings {
-    /// Squared step tolerance: the iteration has converged once the squared
-    /// norm of the Newton step is below it
-    x_tol_squared: f64,
-    /// Squared residual tolerance: the iteration has converged once the
-    /// squared norm of the residual is below it
-    f_tol_squared: f64,
+    /// Step tolerance: the iteration has converged once the norm of the
+    /// Newton step is below it
+    pub(crate) x_tol: f64,
+    /// Residual tolerance: the iteration has converged once the norm of the
+    /// residual is below it
+    pub(crate) f_tol: f64,
     /// Maximum number of Newton iterations before giving up
-    maximum_iterations: usize,
+    pub(crate) maximum_iterations: usize,
 }
 
 impl Settings {
@@ -71,8 +71,8 @@ impl Settings {
     pub fn new(size: usize) -> Self {
         assert!(size > 0, "Invalid size {size}");
         Settings {
-            x_tol_squared: X_TOL_DEFAULT * X_TOL_DEFAULT,
-            f_tol_squared: F_TOL_DEFAULT * F_TOL_DEFAULT,
+            x_tol: X_TOL_DEFAULT,
+            f_tol: F_TOL_DEFAULT,
             maximum_iterations: size * MAX_ITERATIONS_DEFAULT,
         }
     }
@@ -85,7 +85,7 @@ impl Settings {
     /// Panics if `x_tol` is not positive.
     pub fn with_x_tol(mut self, x_tol: f64) -> Self {
         assert!(x_tol > 0.0, "Invalid tolerance {x_tol}");
-        self.x_tol_squared = x_tol * x_tol;
+        self.x_tol = x_tol;
         self
     }
 
@@ -97,7 +97,7 @@ impl Settings {
     /// Panics if `f_tol` is not positive.
     pub fn with_f_tol(mut self, f_tol: f64) -> Self {
         assert!(f_tol > 0.0, "Invalid tolerance {f_tol}");
-        self.f_tol_squared = f_tol * f_tol;
+        self.f_tol = f_tol;
         self
     }
 
@@ -127,22 +127,21 @@ mod settings_tests {
     fn settings_defaults() {
         let settings = Settings::new(2);
 
-        assert_eq!(settings.x_tol_squared, X_TOL_DEFAULT * X_TOL_DEFAULT);
-        assert_eq!(settings.f_tol_squared, F_TOL_DEFAULT * F_TOL_DEFAULT);
+        assert_eq!(settings.x_tol, X_TOL_DEFAULT);
+        assert_eq!(settings.f_tol, F_TOL_DEFAULT);
         assert_eq!(settings.maximum_iterations, 2 * MAX_ITERATIONS_DEFAULT);
     }
 
     #[test]
-    /// The `with_*` methods set the tolerances, squared, and the maximum
-    /// iterations
+    /// The `with_*` methods set the tolerances and the maximum iterations
     fn settings_with() {
         let settings = Settings::new(2)
             .with_x_tol(2.0)
             .with_f_tol(3.0)
             .with_maximum_iterations(10);
 
-        assert_eq!(settings.x_tol_squared, 4.0);
-        assert_eq!(settings.f_tol_squared, 9.0);
+        assert_eq!(settings.x_tol, 2.0);
+        assert_eq!(settings.f_tol, 3.0);
         assert_eq!(settings.maximum_iterations, 10);
     }
 }

@@ -31,5 +31,6 @@ pub mod settings;
 mod solve;
 
 mod error_history;
+mod stagnation_tracker;
 
 pub use solve::{NewtonError, NewtonStatus, NewtonWorkspace, solve};

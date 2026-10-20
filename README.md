@@ -13,6 +13,7 @@ Not yet implemented.
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test and develop this package.
+The design decisions behind the code are collected in [DESIGN.md](DESIGN.md).
 
 ## C Interface
 

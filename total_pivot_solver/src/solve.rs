@@ -69,13 +69,13 @@ pub enum SolveStatus {
 pub enum SolveError {
     /// The matrix contains NaN or infinite values. Checked before the
     /// elimination, the C implementation fails later with a NaN determinant.
-    MatrixNoxFinite,
+    MatrixNotFinite,
     /// The determinant is NaN: the product of the pivots overflowed to
     /// infinity and was multiplied with a zero diagonal entry beyond the rank
     NanDeterminant,
     /// The matrix is rank-deficient and the system is inconsistent, a row
     /// without pivot has a right-hand side larger than `1e-6`
-    UnderDeterminde,
+    UnderDetermined,
 }
 
 /// Gaussian elimination with complete ("total") pivoting
@@ -123,7 +123,7 @@ pub fn solve(
     );
 
     if !matrix.is_all_finite() {
-        return Err(SolveError::MatrixNoxFinite);
+        return Err(SolveError::MatrixNotFinite);
     }
 
     let mut matrix = PermutedMatrix::new(matrix);

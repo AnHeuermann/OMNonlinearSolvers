@@ -40,7 +40,7 @@ use permuted_matrix::PermutedMatrix;
 ///
 /// # Errors
 ///
-/// Returns [`SolveError::UnderDeterminde`] if a row without pivot has a
+/// Returns [`SolveError::UnderDetermined`] if a row without pivot has a
 /// right-hand side larger than `1e-6`.
 ///
 /// [`forward_elimination`]: crate::forward_elimination::forward_elimination
@@ -55,7 +55,7 @@ pub(crate) fn backward_elimination(
     for i in (0..n_rows).rev() {
         if i >= rank {
             if matrix[(i, n_rows)].abs() > 1e-6 {
-                return Err(SolveError::UnderDeterminde);
+                return Err(SolveError::UnderDetermined);
             } else {
                 let col_index_i = matrix.column_permutation()[i];
                 x[col_index_i] = 0.0;
@@ -152,6 +152,6 @@ mod backward_elimination_tests {
 
         let result = backward_elimination(&p, 2);
 
-        assert!(matches!(result, Err(SolveError::UnderDeterminde)));
+        assert!(matches!(result, Err(SolveError::UnderDetermined)));
     }
 }

@@ -21,6 +21,8 @@
   OpenModelica models, shared by the tests of `newton`, `homotopy_core` and
   regression tests against the C solver. Do this when the Newton tests need
   the same test systems in several crates.
+* `SystemInfo` has public members, so a caller could input wrong values. Add
+  getters.
 
 [nalgebra]: https://nalgebra.rs
 [newton_rootfinder]: https://github.com/Nateckert/newton_rootfinder
