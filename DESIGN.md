@@ -54,6 +54,13 @@ the bindings, the pointers into the runtime and a C wrapper that catches the
 Runtime state that is not numerics, like the relations of mixed systems and
 `discreteCall`, stays in `homotopy_capi`.
 
+### The line search is a module of `newton`, not a crate yet
+
+Only Newton damps its steps, so `newton/src/line_search/` stays a module until
+a second solver needs it. It only depends on `nls_model` and takes slices and
+the slope `φ'(0)` instead of Newton's workspace and errors, so it can move into
+its own crate without changes.
+
 ## Model Interface
 
 ### A trait implemented by each system
@@ -129,6 +136,16 @@ error, also because a panic must not unwind into the C runtime.
 Buffers are allocated once and reused: workspace structs like
 `NewtonWorkspace`, output slices and matrix views as parameters. Buffers of a
 fixed size are `Box<[f64]>`, not `Vec`.
+
+### Inputs first, outputs last
+
+Like the standard library, for example `Read::read(&mut self, buf)`,
+parameters that are only read come first and output slices last, as in
+`ModelFunctions::eval(&mut self, x, res)` and
+`scaling::variables(nominal, x, factor)`. A value that is modified in place,
+like the matrix of `total_pivot_solver::solve` or `x` of `newton::solve`,
+comes first, as `self` would. Small results are returned, not written into
+parameters.
 
 ## Settings and Logging
 

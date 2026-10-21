@@ -43,8 +43,8 @@ use faer::{MatMut, MatRef};
 ///
 /// # Panics
 ///
-/// Panics if `factor`, `nominal` and `x` don't have the same length.
-pub fn variables(factor: &mut [f64], nominal: &[f64], x: &[f64]) {
+/// Panics if `nominal`, `x` and `factor` don't have the same length.
+pub fn variables(nominal: &[f64], x: &[f64], factor: &mut [f64]) {
     assert_eq!(factor.len(), nominal.len());
     assert_eq!(factor.len(), x.len());
 
@@ -65,7 +65,7 @@ pub fn variables(factor: &mut [f64], nominal: &[f64], x: &[f64]) {
 /// # Panics
 ///
 /// Panics if `matrix` is not `n×(n+1)` or `factor` doesn't have `n` entries.
-pub fn residuals(factor: &mut [f64], matrix: MatRef<'_, f64>) {
+pub fn residuals(matrix: MatRef<'_, f64>, factor: &mut [f64]) {
     assert_eq!(factor.len(), matrix.nrows());
     assert_eq!(matrix.nrows() + 1, matrix.ncols(), "Matrix has wrong shape");
 

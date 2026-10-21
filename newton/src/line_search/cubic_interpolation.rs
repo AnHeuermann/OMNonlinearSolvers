@@ -28,9 +28,9 @@
 // TODO: Remove once the port is complete
 #![allow(dead_code)]
 
-use crate::line_search::TrialPoint;
+use super::TrialPoint;
 
-/// Cubic interpolation on `φ(λ) = ‖f(x + λ·dy)‖²`
+/// Cubic interpolation on `φ(λ) = ‖F(x + λ·dy)‖²`
 ///
 /// Fits `φ(λ) ≈ a₃λ³ + a₂λ² + g·λ + err` through the two trial points `p1`
 /// and `p2` and returns the step factor at its local minimum. If the fit has

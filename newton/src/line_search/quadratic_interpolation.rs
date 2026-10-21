@@ -28,9 +28,9 @@
 // TODO: Remove once the port is complete
 #![allow(dead_code)]
 
-use crate::line_search::TrialPoint;
+use super::TrialPoint;
 
-/// Quadratic interpolation on `φ(λ) = ‖f(x + λ·dy)‖²`
+/// Quadratic interpolation on `φ(λ) = ‖F(x + λ·dy)‖²`
 ///
 /// Fits the parabola `φ(λ) ≈ a₂λ² + g·λ + err` through the trial point `p1`
 /// and returns the step factor at its minimum.
@@ -56,8 +56,8 @@ pub(crate) fn quadratic_interpolation(err: f64, g: f64, p1: &TrialPoint) -> f64 
 
 #[cfg(test)]
 mod quadratic_interpolation_tests {
+    use super::super::search::ALPHA;
     use super::*;
-    use crate::line_search::ALPHA;
 
     #[test]
     /// `φ(λ) = 1 − 2λ + 4λ²` is a parabola with its minimum at `λ = 0.25`

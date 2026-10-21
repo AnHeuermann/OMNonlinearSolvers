@@ -46,7 +46,7 @@ fn variable_scaling_test() {
     let x = [-10.0, 25.0, 10.0];
     let mut factor = vec![0.0; 3];
 
-    variables(&mut factor, &nominal, &x);
+    variables(&nominal, &x, &mut factor);
     assert_eq!(factor, [10.0, 100.0, 10.0]);
 }
 
@@ -57,7 +57,7 @@ fn residual_scaling_test() {
     let m = mat![[1.0, -2.0, 10.0], [-3.0, 4.0, 20.0]];
     let mut factor = vec![1.0; 2];
 
-    residuals(&mut factor, m.as_ref());
+    residuals(m.as_ref(), &mut factor);
     assert_eq!(factor, [3.0, 7.0]);
 }
 
