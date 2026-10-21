@@ -30,6 +30,7 @@
 
 use super::TrialPoint;
 use super::cubic_interpolation::cubic_interpolation;
+use super::quadratic_interpolation::quadratic_interpolation;
 
 use nls_model::EvalError;
 
@@ -208,7 +209,11 @@ fn needs_damping(start: &Start, p1: &TrialPoint, p1_err_scaled: f64) -> bool {
         && start.err_scaled > DAMPING_THRESHOLD
 }
 
-fn quadratic_step() {}
+/// Step factor from the quadratic interpolation through the trial point `p1`,
+/// which [`needs_damping`]. The result is at least [`LAMBDA_MIN`].
+fn quadratic_step(start: &Start, p1: &TrialPoint) -> f64 {
+    quadratic_interpolation(start.err, start.g, p1).max(LAMBDA_MIN)
+}
 
 /// Step factor from the cubic interpolation through the trial points `p1` and
 /// `p2`, where `p1` is the first trial point of the line search.
@@ -322,6 +327,27 @@ mod line_search_tests {
             error: 2.0 * err,
         };
         assert!(!needs_damping(&start(err), &p1, 2.0 * err));
+    }
+
+    #[test]
+    /// `φ(λ) = 1 − 2λ + 4λ²` has its minimum at `λ = 0.25`
+    fn quadratic_step_test() {
+        let p1 = TrialPoint {
+            lambda: 1.0,
+            error: 3.0,
+        };
+        assert_eq!(quadratic_step(&start(1.0), &p1), 0.25);
+    }
+
+    #[test]
+    /// A short trial step with a huge error gives a minimum far below
+    /// [`LAMBDA_MIN`], the step is clamped to it
+    fn quadratic_step_lambda_min_test() {
+        let p1 = TrialPoint {
+            lambda: 1e-3,
+            error: 1e6,
+        };
+        assert_eq!(quadratic_step(&start(1.0), &p1), LAMBDA_MIN);
     }
 
     /// Result, number of evaluations, `x1` and `f` of a back off
