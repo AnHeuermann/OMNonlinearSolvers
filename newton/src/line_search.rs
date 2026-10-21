@@ -29,7 +29,7 @@
 #![allow(dead_code, unused_imports, unused_variables)]
 
 use crate::NewtonWorkspace;
-use crate::cubic_interpolation::{TrialPoint, cubic_interpolation};
+use crate::cubic_interpolation::cubic_interpolation;
 
 use nls_model::EvalError;
 
@@ -43,9 +43,19 @@ pub(crate) fn line_search(workspace: &NewtonWorkspace) {
     todo!()
 }
 
+/// Trial point of the line search: a step factor `lambda` and its error
+/// `φ(lambda)`
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TrialPoint {
+    pub(crate) lambda: f64,
+    pub(crate) error: f64,
+}
+
+/// Factor `α` of the sufficient decrease in the Armijo test
+pub(crate) const ALPHA: f64 = 1e-1;
+
 /// Armijo inequality err_1 > err_0 + α·λ₁·g with `α = 1e-1`.
 fn armijo_inequality(err_0: f64, err_1: f64, lambda_1: f64, g_0: f64) -> bool {
-    const ALPHA: f64 = 1e-1;
     err_1 > err_0 + ALPHA * lambda_1 * g_0
 }
 

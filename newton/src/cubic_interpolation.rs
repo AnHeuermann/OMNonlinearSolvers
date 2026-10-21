@@ -28,13 +28,7 @@
 // TODO: Remove once the port is complete
 #![allow(dead_code)]
 
-/// Trial point of the line search: a step factor `lambda` and its error
-/// `φ(lambda)`
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct TrialPoint {
-    pub(crate) lambda: f64,
-    pub(crate) error: f64,
-}
+use crate::line_search::TrialPoint;
 
 /// Cubic interpolation on `φ(λ) = ‖f(x + λ·dy)‖²`
 ///
