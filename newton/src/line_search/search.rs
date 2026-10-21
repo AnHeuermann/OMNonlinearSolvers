@@ -62,34 +62,59 @@ impl From<EvalError> for LineSearchError {
     }
 }
 
-/// Line search
+/// Line search along `dy` from `x`: find a step factor `λ` that decreases
+/// the squared error `φ(λ) = ‖F(x + λ·dy)‖²` enough.
 ///
-/// Iterative approach to find a local minimum `x1` of the error function with
-/// the residual `f(x)`.
+/// 1. Back off from the full step while the model asserts, see
+///    [`back_off_failed_eval`]. Keep that step `λ₁` unless it
+///    [`needs_damping`].
+/// 2. Otherwise evaluate at the [`quadratic_step`] `λ₂`, and keep it unless
+///    the [`needs_cubic_step`] test fails.
+/// 3. Otherwise evaluate at the [`cubic_step`] and keep it without testing it.
 ///
-/// `x`, the current iterate `dy`, the Newton step, already scaled back to the
-/// original variables by `solve` `res_scaling` `err` and `err_scaled` from the
-/// last iteration
-/// Writes accepted trial point into `x1`  and residual `F(x1)` into `f`
+/// `start` holds `φ(0)` and `φ'(0)`, and `res_scaling` the residual scaling
+/// of the scaled error. Returns the step factor taken. `x1` then holds the
+/// trial point `x + λ·dy` and `f` its residual `F(x1)`.
+///
+/// # Errors
+///
+/// * [`LineSearchError::BackedOffBelowLambdaMin`] or
+///   [`LineSearchError::ModelError`] from [`back_off_failed_eval`]
+/// * [`LineSearchError::ModelError`] if the model fails at the quadratic or
+///   cubic step, which aborts without backing off
+///
+/// After an error `x1` and `f` are unspecified. `x` is never changed.
 pub(crate) fn line_search(
     eval: &mut impl EvalFunction,
-    starting_x: &[f64],
-    direction_dy: &[f64],
-    phi_0: f64,
-    g: f64,
-) -> Result<(), LineSearchError> {
-    // lambda = back_off_failed_eval(eval, starting_x, direction_dy)?;
+    x: &[f64],
+    dy: &[f64],
+    res_scaling: &[f64],
+    start: &Start,
+    x1: &mut [f64],
+    f: &mut [f64],
+) -> Result<f64, LineSearchError> {
+    let lambda1 = back_off_failed_eval(eval, x, dy, x1, f)?;
+    let p1 = TrialPoint {
+        lambda: lambda1,
+        error: squared_error(f),
+    };
+    if !needs_damping(start, &p1, scaled_squared_error(f, res_scaling)) {
+        return Ok(lambda1);
+    }
 
-    // 2. Sufficient decrease test (Armijo, α = 0.1). The slope is g = −2·err. If
-    //    the new error err1 > err + α·λ·g, and the scaled error fails the same
-    //    test, and both errors are above 1e-12, the step is too long.
-    // 3. Quadratic interpolation. Compute λ₂ = max(−λ²·g / (2·(err1 − err − λ·g)),
-    //    1e-4) and evaluate at λ₂.
-    // 4. Cubic interpolation. If the test still fails, fit a cubic through both
-    //    trial points, take its minimum as λ, evaluate once more and accept that
-    //    step without testing it again.
+    let lambda2 = quadratic_step(start, &p1);
+    eval_at(eval, x, dy, lambda2, x1, f)?;
+    let p2 = TrialPoint {
+        lambda: lambda2,
+        error: squared_error(f),
+    };
+    if !needs_cubic_step(start, &p1, &p2) {
+        return Ok(lambda2);
+    }
 
-    todo!()
+    let lambda = cubic_step(start.err, start.g, &p1, &p2);
+    eval_at(eval, x, dy, lambda, x1, f)?;
+    Ok(lambda)
 }
 
 /// Evaluate the trial point `x1 = x + λ·dy` and write `F(x1)` into `f`
@@ -213,6 +238,16 @@ fn needs_damping(start: &Start, p1: &TrialPoint, p1_err_scaled: f64) -> bool {
 /// which [`needs_damping`]. The result is at least [`LAMBDA_MIN`].
 fn quadratic_step(start: &Start, p1: &TrialPoint) -> f64 {
     quadratic_interpolation(start.err, start.g, p1).max(LAMBDA_MIN)
+}
+
+/// Whether the quadratic step `p2` is still too long after damping `p1`.
+///
+/// Like the C runtime this tests the error of `p1`, not of `p2`, against the
+/// Armijo bound of `λ₂`, and doesn't test the scaled error.
+fn needs_cubic_step(start: &Start, p1: &TrialPoint, p2: &TrialPoint) -> bool {
+    insufficient_decrease(start.err, p1.error, p2.lambda, start.g)
+        && start.err > DAMPING_THRESHOLD
+        && start.err_scaled > DAMPING_THRESHOLD
 }
 
 /// Step factor from the cubic interpolation through the trial points `p1` and
@@ -348,6 +383,126 @@ mod line_search_tests {
             error: 1e6,
         };
         assert_eq!(quadratic_step(&start(1.0), &p1), LAMBDA_MIN);
+    }
+
+    #[test]
+    /// The C runtime tests the error of `p1` against the bound of `λ₂`. From
+    /// `φ(0) = 1` with `λ₂ = 0.5` that bound is `0.9`.
+    fn needs_cubic_step_test() {
+        let p1 = TrialPoint {
+            lambda: 1.0,
+            error: 0.95,
+        };
+        let p2 = TrialPoint {
+            lambda: 0.5,
+            error: 0.0,
+        };
+        assert!(
+            needs_cubic_step(&start(1.0), &p1, &p2),
+            "error of p2 is ignored"
+        );
+
+        let p1 = TrialPoint {
+            lambda: 1.0,
+            error: 0.85,
+        };
+        assert!(!needs_cubic_step(&start(1.0), &p1, &p2));
+    }
+
+    /// Result, number of evaluations, `x1` and `f` of a line search
+    type Search = (Result<f64, LineSearchError>, usize, [f64; 1], [f64; 1]);
+
+    /// Line search from `x = 0` along the Newton step `dy = 1` of the model
+    /// `F(x) = h(x)` with `h(0) = 1` and `h'(0) = −1`, so `x1 = λ`.
+    /// `fail(call)` is the error of the evaluation number `call`, counted from
+    /// 1, or `None` if it succeeds.
+    fn search(h: impl Fn(f64) -> f64, fail: impl Fn(usize) -> Option<EvalError>) -> Search {
+        let mut x1 = [0.0];
+        let mut f = [0.0];
+        let mut calls = 0;
+        let mut eval = |x: &[f64], f: &mut [f64]| {
+            calls += 1;
+            f[0] = h(x[0]);
+            fail(calls).map_or(Ok(()), Err)
+        };
+
+        let result = line_search(
+            &mut eval,
+            &[0.0],
+            &[1.0],
+            &[1.0],
+            &start(1.0),
+            &mut x1,
+            &mut f,
+        );
+        (result, calls, x1, f)
+    }
+
+    #[test]
+    /// A linear model reaches the solution with the full step
+    fn line_search_full_step_test() {
+        let (result, calls, x1, f) = search(|x| 1.0 - x, |_| None);
+
+        assert!(matches!(result, Ok(1.0)), "got {result:?}");
+        assert_eq!(calls, 1);
+        assert_eq!((x1, f), ([1.0], [0.0]));
+    }
+
+    #[test]
+    /// `h(λ) = 1 − λ + 0.92·λ²`: the full step `φ(1) = 0.8464` fails the
+    /// Armijo bound 0.8, the quadratic step `λ₂ = 1 / (1 + φ(1))` is kept
+    /// because `φ(1)` is below its bound `1 − 0.2·λ₂`.
+    fn line_search_quadratic_step_test() {
+        let h = |x: f64| 1.0 - x + 0.92 * x * x;
+        let (result, calls, x1, f) = search(h, |_| None);
+
+        let lambda2 = 1.0 / (1.0 + 0.92 * 0.92);
+        let lambda = result.unwrap();
+        assert!((lambda - lambda2).abs() < 1e-15, "got {lambda}");
+        assert_eq!(calls, 2);
+        assert_eq!((x1, f), ([lambda], [h(lambda)]));
+    }
+
+    #[test]
+    /// `h(λ) = 1 − λ + λ²`: `φ(1) = 1` fails both tests. The cubic through
+    /// `φ(1) = 1` and `φ(0.5) = 0.5625` has `a₃ = −0.5`, `a₂ = 2.5` and its
+    /// minimum at `λ = 2 / (2.5 + √3.25)`.
+    fn line_search_cubic_step_test() {
+        let h = |x: f64| 1.0 - x + x * x;
+        let (result, calls, x1, f) = search(h, |_| None);
+
+        let expected = 2.0 / (2.5 + 3.25_f64.sqrt());
+        let lambda = result.unwrap();
+        assert!((lambda - expected).abs() < 1e-15, "got {lambda}");
+        assert_eq!(calls, 3);
+        assert_eq!((x1, f), ([lambda], [h(lambda)]));
+    }
+
+    #[test]
+    /// After backing off, the damping starts from the backed off step
+    fn line_search_back_off_test() {
+        let h = |x: f64| 1.0 - x + x * x;
+        let (result, calls, _, _) = search(h, |call| (call == 1).then_some(EvalError::Assert));
+
+        // φ(0.655) = 0.599 is below the Armijo bound 1 − 0.2·0.655 = 0.869
+        assert!(
+            matches!(result, Ok(l) if l == LAMBDA_SCALE_DOWN),
+            "got {result:?}"
+        );
+        assert_eq!(calls, 2);
+    }
+
+    #[test]
+    /// A model error at a damped step aborts without backing off
+    fn line_search_model_error_test() {
+        let h = |x: f64| 1.0 - x + x * x;
+        let (result, calls, _, _) = search(h, |call| (call == 2).then_some(EvalError::Assert));
+
+        assert!(
+            matches!(result, Err(LineSearchError::ModelError(EvalError::Assert))),
+            "got {result:?}"
+        );
+        assert_eq!(calls, 2);
     }
 
     /// Result, number of evaluations, `x1` and `f` of a back off
