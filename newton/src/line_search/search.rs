@@ -159,6 +159,55 @@ fn insufficient_decrease(err_0: f64, err_1: f64, lambda_1: f64, g_0: f64) -> boo
     err_1 > err_0 + ALPHA * lambda_1 * g_0
 }
 
+/// The start of the line search at `λ = 0`: the squared error `φ(0)` of the
+/// current iterate and the slope `φ'(0)`, unscaled and with the residual
+/// scaling
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Start {
+    pub(crate) err: f64,
+    pub(crate) err_scaled: f64,
+    pub(crate) g: f64,
+    pub(crate) g_scaled: f64,
+}
+
+/// Errors at or below this are too close to the solution to damp the step
+const DAMPING_THRESHOLD: f64 = 1e-12;
+
+/// Squared error `‖f‖²` of a residual
+fn squared_error(f: &[f64]) -> f64 {
+    f.iter().map(|f| f * f).sum()
+}
+
+/// Squared scaled error `‖f / |res_scaling|‖²` of a residual. Entries with a
+/// scaling of zero stay unscaled, like `vecDivScaling` in the C runtime.
+fn scaled_squared_error(f: &[f64], res_scaling: &[f64]) -> f64 {
+    debug_assert_eq!(f.len(), res_scaling.len());
+
+    f.iter()
+        .zip(res_scaling)
+        .map(|(f, scaling)| {
+            let scaled = if scaling.abs() > 0.0 {
+                f / scaling.abs()
+            } else {
+                *f
+            };
+            scaled * scaled
+        })
+        .sum()
+}
+
+/// Whether the trial step `p1` is too long and must be damped.
+///
+/// That is the case if both its error and its scaled error `p1_err_scaled`
+/// fail the Armijo test, and the current iterate isn't already within
+/// [`DAMPING_THRESHOLD`] of a solution.
+fn needs_damping(start: &Start, p1: &TrialPoint, p1_err_scaled: f64) -> bool {
+    insufficient_decrease(start.err, p1.error, p1.lambda, start.g)
+        && insufficient_decrease(start.err_scaled, p1_err_scaled, p1.lambda, start.g_scaled)
+        && start.err > DAMPING_THRESHOLD
+        && start.err_scaled > DAMPING_THRESHOLD
+}
+
 fn quadratic_step() {}
 
 /// Step factor from the cubic interpolation through the trial points `p1` and
@@ -176,8 +225,6 @@ fn cubic_step(err: f64, g: f64, p1: &TrialPoint, p2: &TrialPoint) -> f64 {
 
 #[cfg(test)]
 mod line_search_tests {
-    use std::f32::consts::E;
-
     use super::*;
 
     #[test]
@@ -197,6 +244,84 @@ mod line_search_tests {
         assert_eq!(cubic_interpolation(err, g, &p1, &p2), Some(f64::INFINITY));
 
         assert_eq!(cubic_step(err, g, &p1, &p2), 0.5);
+    }
+
+    #[test]
+    fn squared_error_test() {
+        assert_eq!(squared_error(&[3.0, -4.0]), 25.0);
+    }
+
+    #[test]
+    /// Entries are divided by the absolute scaling, a scaling of zero keeps
+    /// the entry unscaled
+    fn scaled_squared_error_test() {
+        assert_eq!(
+            scaled_squared_error(&[2.0, 3.0, 5.0], &[2.0, -3.0, 0.0]),
+            27.0
+        );
+    }
+
+    /// Start with the error `err` and the Newton slope `g = −2·err`, the same
+    /// scaled and unscaled
+    fn start(err: f64) -> Start {
+        Start {
+            err,
+            err_scaled: err,
+            g: -2.0 * err,
+            g_scaled: -2.0 * err,
+        }
+    }
+
+    #[test]
+    /// From `φ(0) = 1` the full step must reach `φ(1) ≤ 0.8`. With 0.9 both
+    /// errors fail the Armijo test.
+    fn needs_damping_test() {
+        let p1 = TrialPoint {
+            lambda: 1.0,
+            error: 0.9,
+        };
+        assert!(needs_damping(&start(1.0), &p1, 0.9));
+    }
+
+    #[test]
+    /// The step is kept if one of the two errors decreased enough
+    fn needs_damping_one_error_decreased_test() {
+        let p1 = TrialPoint {
+            lambda: 1.0,
+            error: 0.9,
+        };
+        assert!(
+            !needs_damping(&start(1.0), &p1, 0.8),
+            "scaled error decreased"
+        );
+
+        let p1 = TrialPoint {
+            lambda: 1.0,
+            error: 0.8,
+        };
+        assert!(!needs_damping(&start(1.0), &p1, 0.9), "error decreased");
+    }
+
+    #[test]
+    /// The Armijo bound scales with `λ₁`: for `λ₁ = 0.5` it is `0.9`
+    fn needs_damping_damped_step_test() {
+        let p1 = TrialPoint {
+            lambda: 0.5,
+            error: 0.85,
+        };
+        assert!(!needs_damping(&start(1.0), &p1, 0.85));
+    }
+
+    #[test]
+    /// Close to the solution the step is never damped, even if it doubles the
+    /// error
+    fn needs_damping_near_solution_test() {
+        let err = DAMPING_THRESHOLD;
+        let p1 = TrialPoint {
+            lambda: 1.0,
+            error: 2.0 * err,
+        };
+        assert!(!needs_damping(&start(err), &p1, 2.0 * err));
     }
 
     /// Result, number of evaluations, `x1` and `f` of a back off
