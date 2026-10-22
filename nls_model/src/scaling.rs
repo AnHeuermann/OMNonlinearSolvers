@@ -29,7 +29,8 @@
 //! and homotopy solvers.
 //!
 //! Ports of the scaling in `nonlinearSolverHomotopy.c`: the variable scaling
-//! `xScaling`, the residual scaling `resScaling` and `scaleMatrixRows`.
+//! `xScaling`, the residual scaling `resScaling`, `scaleMatrixRows` and the
+//! column scaling of the Jacobian.
 
 use faer::reborrow::{Reborrow, ReborrowMut};
 use faer::{MatMut, MatRef};
@@ -66,11 +67,15 @@ pub fn variables(nominal: &[f64], x: &[f64], factor: &mut [f64]) {
 ///
 /// Panics if `matrix` is not `n×(n+1)` or `factor` doesn't have `n` entries.
 pub fn residuals(matrix: MatRef<'_, f64>, factor: &mut [f64]) {
-    assert_eq!(factor.len(), matrix.nrows());
+    assert_eq!(
+        factor.len(),
+        matrix.nrows(),
+        "Scaling vector has wrong length"
+    );
     assert_eq!(matrix.nrows() + 1, matrix.ncols(), "Matrix has wrong shape");
 
-    let matrix = matrix.subcols(0, matrix.nrows());
-    for (out, row) in factor.iter_mut().zip(matrix.row_iter()) {
+    let jacobian = matrix.subcols(0, matrix.nrows());
+    for (out, row) in factor.iter_mut().zip(jacobian.row_iter()) {
         *out = row.norm_l1();
     }
 }
@@ -97,5 +102,30 @@ pub fn rows(mut matrix: MatMut<'_, f64>) {
         let maximum = row.rb().subcols(0, n).norm_max();
         let scale = if maximum <= DELTA { 1.0 } else { maximum };
         row /= scale;
+    }
+}
+
+/// Scale each column `j` of the Jacobian in the linear system `[J | b]` by
+/// `factor[j]`.
+///
+/// `matrix` is the `n×(n+1)` matrix `[J | b]` and `factor` the [`variables`]
+/// scaling of the `n` unknowns. Scaling the unknowns as `x = factor·x̃` turns
+/// `J·x = −b` into `(J·diag(factor))·x̃ = −b`, so only the columns of `J`
+/// change and the right-hand side `b` stays unchanged. A solution `x̃` of the
+/// scaled system must be multiplied by `factor` to get `x`. From the column
+/// scaling in `getAnalyticalJacobianHomotopy` and
+/// `getNumericalJacobianHomotopy`.
+///
+/// # Panics
+///
+/// Panics if `matrix` is not `n×(n+1)` or `factor` doesn't have `n` entries.
+pub fn columns(matrix: MatMut<'_, f64>, factor: &[f64]) {
+    let n = matrix.nrows();
+    assert_eq!(factor.len(), n, "Scaling vector has wrong length");
+    assert_eq!(matrix.ncols(), n + 1, "Matrix has wrong shape");
+
+    let jacobian = matrix.subcols_mut(0, n);
+    for (mut col, factor) in jacobian.col_iter_mut().zip(factor) {
+        col *= factor;
     }
 }
