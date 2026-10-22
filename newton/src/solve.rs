@@ -76,6 +76,7 @@ impl NewtonWorkspace {
 }
 
 /// How a successful [`solve`] ended.
+#[derive(Debug, PartialEq)]
 pub enum NewtonStatus {
     /// Converged: the residual and the last step are below their tolerances
     Solved,
@@ -85,6 +86,7 @@ pub enum NewtonStatus {
 }
 
 /// Why [`solve`] found no solution.
+#[derive(Debug)]
 pub enum NewtonError {
     /// The maximum number of iterations of the [`Settings`] is reached
     MaxIterations,

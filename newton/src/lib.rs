@@ -32,6 +32,6 @@ mod solve;
 
 mod error_history;
 mod line_search;
-mod stagnation_tracker;
+mod tracker;
 
 pub use solve::{NewtonError, NewtonStatus, NewtonWorkspace, solve};

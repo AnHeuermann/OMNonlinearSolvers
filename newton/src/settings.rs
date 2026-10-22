@@ -144,4 +144,11 @@ mod settings_tests {
         assert_eq!(settings.f_tol, 3.0);
         assert_eq!(settings.maximum_iterations, 10);
     }
+
+    #[test]
+    #[should_panic = "Invalid tolerance"]
+    /// The residual tolerance must be positive
+    fn invalid_tolerance_test() {
+        let _ = Settings::new(2).with_f_tol(0.0);
+    }
 }

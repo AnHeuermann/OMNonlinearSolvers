@@ -67,6 +67,12 @@ impl ErrorHistory {
         cycle
     }
 
+    /// Whether the history is full and its newest error is not above the three
+    /// before it, the bottom of a limit cycle.
+    pub(crate) fn newest_is_lowest(&self) -> bool {
+        self.len == 4 && self.values[1..].iter().all(|&err| self.values[0] <= err)
+    }
+
     /// Whether `err` closes a limit cycle, without changing the history.
     ///
     /// True if the history is full, `err` changed since the last error, and
@@ -141,6 +147,21 @@ mod error_history_tests {
         // The cycle is reported and 1.0 is added nevertheless
         assert!(history.push(1.0));
         assert_eq!(history.values(), [1.0, 2.0, 1.0, 2.0]);
+    }
+
+    #[test]
+    /// The newest error is the lowest if it is not above any of the three
+    /// before it, equal errors included. A history that isn't full has none.
+    fn newest_is_lowest_test() {
+        let mut history = ErrorHistory::new();
+        push_all(&mut history, &[2.0, 1.0, 3.0]);
+        assert!(!history.newest_is_lowest(), "history not full");
+
+        history.push(1.0);
+        assert!(history.newest_is_lowest(), "equal to the lowest");
+
+        history.push(1.5);
+        assert!(!history.newest_is_lowest());
     }
 
     #[test]
