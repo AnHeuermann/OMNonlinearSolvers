@@ -31,5 +31,6 @@
 pub mod settings;
 
 mod homotopy_function;
+mod tangent;
 
 pub use homotopy_function::{FixpointHomotopy, NewtonHomotopy};
