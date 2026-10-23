@@ -75,6 +75,11 @@ impl NewtonWorkspace {
             res_scaling: vec![0.0; num_residuals].into_boxed_slice(),
         }
     }
+
+    /// The residual scaling of the latest Jacobian of [`solve`].
+    pub fn res_scaling(&self) -> &[f64] {
+        &self.res_scaling
+    }
 }
 
 /// How a successful [`solve`] ended.

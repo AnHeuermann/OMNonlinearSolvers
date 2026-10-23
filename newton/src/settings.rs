@@ -77,6 +77,11 @@ impl Settings {
         }
     }
 
+    /// The residual tolerance `f_tol`.
+    pub fn f_tol(&self) -> f64 {
+        self.f_tol
+    }
+
     /// Sets the step tolerance, the iteration has converged once the norm of
     /// the Newton step is below `x_tol`.
     ///

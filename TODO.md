@@ -38,6 +38,15 @@
   before adding the identity, so the path following solves with
   `λ·J·S + (1 − λ)·I` instead of `(λ·J + (1 − λ)·I)·S`. `FixpointHomotopy`
   reproduces that, see its doc comment.
+* Let Newton's method of the strategy keep the variable scaling of the start
+  point, once there is a test oracle against the C runtime. `newton::solve`
+  computes it from its own start point, so the polish after a homotopy uses
+  the end of the path, while C keeps the scaling of `x₀`. This needs a
+  `newton::solve` that takes a given scaling.
+* Avoid the extra Jacobian of the start point check in
+  `HomotopySolver::solve`. C solves the first linear system there and reuses
+  it as the first Newton step, `newton::solve` evaluates the Jacobian again.
+  This needs a `newton::solve` that starts from a prepared linear system.
 * Implement OpenModelica-like logging. The target is the C stream without the
   `OMC_LOG_` prefix and the `_V` suffix, and a verbose stream becomes `trace!`
   unless the message is a clear error. So

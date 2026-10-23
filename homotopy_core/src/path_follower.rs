@@ -47,6 +47,14 @@ pub enum Direction {
 }
 
 impl Direction {
+    /// The other direction
+    pub fn opposite(self) -> Self {
+        match self {
+            Direction::Positive => Direction::Negative,
+            Direction::Negative => Direction::Positive,
+        }
+    }
+
     /// `+1` or `−1`, the `startDirection` of the C runtime
     fn sign(self) -> f64 {
         match self {

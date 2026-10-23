@@ -35,7 +35,9 @@ mod homotopy_function;
 mod path_follower;
 mod predictor;
 mod step_control;
+mod strategy;
 mod tangent;
 
 pub use homotopy_function::{FixpointHomotopy, NewtonHomotopy};
 pub use path_follower::{Direction, PathError, follow_path};
+pub use strategy::{HomotopyError, HomotopyRun, HomotopySolver, Solved};
