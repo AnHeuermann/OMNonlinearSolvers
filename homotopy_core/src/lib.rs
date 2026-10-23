@@ -33,6 +33,7 @@ pub mod settings;
 mod corrector;
 mod homotopy_function;
 mod predictor;
+mod step_control;
 mod tangent;
 
 pub use homotopy_function::{FixpointHomotopy, NewtonHomotopy};
