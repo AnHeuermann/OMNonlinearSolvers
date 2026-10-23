@@ -587,6 +587,7 @@ name = "homotopy_core"
 version = "0.1.0"
 dependencies = [
  "env_logger",
+ "faer",
  "log",
  "newton",
  "nls_model",

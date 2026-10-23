@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+faer.workspace = true
 nls_model = { path = "../nls_model" }
 total_pivot_solver = { path = "../total_pivot_solver" }
 log.workspace = true

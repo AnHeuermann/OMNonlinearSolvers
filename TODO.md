@@ -25,6 +25,14 @@
   the caller, as DESIGN.md asks.
 * Statistics of a solve, e.g. the number of iterations the C runtime adds to
   `numberOfIterations`. Add them together with the homotopy.
+* Maybe add the hybrd fallback of Minpack, which `solveHomotopy` tries when
+  Newton fails, before the homotopy runs. Left out for now, there is no
+  Minpack in Rust. It could also be a fallback solver passed in by
+  `homotopy_capi`.
+* Port corrector strategy 2 of `homotopyAlgorithm` (`homBacktraceStrategy`):
+  back to the path orthogonally to the tangent, with the extended system of
+  `orthogonalBacktraceMatrix`. Only strategy 1, the default, fixing one
+  coordinate, is ported.
 * Implement OpenModelica-like logging. The target is the C stream without the
   `OMC_LOG_` prefix and the `_V` suffix, and a verbose stream becomes `trace!`
   unless the message is a clear error. So

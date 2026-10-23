@@ -27,3 +27,9 @@
 
 //! The homotopy algorithm of `nonlinearSolverHomotopy.c`, built on the Newton
 //! solver of the `newton` crate.
+
+pub mod settings;
+
+mod homotopy_function;
+
+pub use homotopy_function::{FixpointHomotopy, NewtonHomotopy};
