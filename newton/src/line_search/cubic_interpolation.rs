@@ -25,8 +25,9 @@
  *
  */
 
-// TODO: Remove once the port is complete
-#![allow(dead_code)]
+//! Cubic interpolation of the line search: the last damping step of
+//! `newtonAlgorithm` in the C runtime, when the quadratic step was still too
+//! long.
 
 use super::TrialPoint;
 

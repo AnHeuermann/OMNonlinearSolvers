@@ -20,6 +20,18 @@
   the same test systems in several crates.
 * `SystemInfo` has public members, so a caller could input wrong values. Add
   getters.
+* `total_pivot_solver::solve` allocates its solution and the permutations on
+  every call, so each Newton iteration allocates. Let it write into buffers of
+  the caller, as DESIGN.md asks.
+* Statistics of a solve, e.g. the number of iterations the C runtime adds to
+  `numberOfIterations`. Add them together with the homotopy.
+* Implement OpenModelica-like logging. The target is the C stream without the
+  `OMC_LOG_` prefix and the `_V` suffix, and a verbose stream becomes `trace!`
+  unless the message is a clear error. So
+  `warningStreamPrint(OMC_LOG_NLS_V, ...)` usually becomes
+  `trace!(target: "NLS", ...)`. Update the log calls in `newton` and
+  `nls_model::scaling` (target `NLS_V` so far) and the `log` entry in
+  DESIGN.md.
 
 [newton_rootfinder]: https://github.com/Nateckert/newton_rootfinder
 [nrfind]: https://github.com/NoraCodes/nrfind

@@ -27,9 +27,6 @@
 
 //! Detection of limit cycles in the residual error of the Newton iteration.
 
-// TODO: Remove once the port is complete
-#![allow(dead_code)]
-
 /// The last four residual errors of the Newton iteration, to detect a limit
 /// cycle.
 ///
@@ -96,16 +93,18 @@ impl ErrorHistory {
         self.values[0] = err;
         self.len += if self.len < 4 { 1 } else { 0 };
     }
-
-    /// The valid errors, newest first
-    fn values(&self) -> &[f64] {
-        self.values[0..self.len].iter().as_slice()
-    }
 }
 
 #[cfg(test)]
 mod error_history_tests {
     use super::*;
+
+    impl ErrorHistory {
+        /// The valid errors, newest first
+        fn values(&self) -> &[f64] {
+            &self.values[0..self.len]
+        }
+    }
 
     #[test]
     /// `push_front` adds the newest error at the front and drops the oldest

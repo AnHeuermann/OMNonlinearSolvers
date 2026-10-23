@@ -26,12 +26,14 @@
  */
 
 //! Tests of the scaling functions for variables, residuals and the rows and
-//! columns of a linear system.
+//! columns of a linear system, and of the errors measured with them.
 
 use equator::assert;
 use faer::mat;
 use faer::utils::approx::{ApproxEq, CwiseMat};
-use nls_model::scaling::{columns, residuals, rows, variables};
+use nls_model::scaling::{
+    columns, make_finite, residuals, rows, scaled_squared_error, squared_error, unscale, variables,
+};
 
 /// Equal up to rounding errors, `128·ε` absolute and relative
 fn approx_eq_eps() -> CwiseMat<ApproxEq<f64>> {
@@ -121,4 +123,38 @@ fn column_scaling_factor_length_test() {
     let mut m = mat![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
 
     columns(m.as_mut(), &[1.0, 2.0, 1.0]);
+}
+
+#[test]
+/// Multiplying by the absolute factor undoes the column scaling, a factor of
+/// zero keeps the entry
+fn unscale_test() {
+    let mut x = [0.0; 3];
+
+    unscale(&[1.0, 2.0, 3.0], &[2.0, -3.0, 0.0], &mut x);
+    assert_eq!(x, [2.0, 6.0, 3.0]);
+}
+
+#[test]
+/// Infinite and NaN factors become 1, finite ones stay
+fn make_finite_test() {
+    let mut factor = [2.0, f64::INFINITY, f64::NAN, f64::NEG_INFINITY, 0.0];
+
+    make_finite(&mut factor);
+    assert_eq!(factor, [2.0, 1.0, 1.0, 1.0, 0.0]);
+}
+
+#[test]
+fn squared_error_test() {
+    assert_eq!(squared_error(&[3.0, -4.0]), 25.0);
+}
+
+#[test]
+/// Entries are divided by the absolute scaling, a scaling of zero keeps the
+/// entry unscaled
+fn scaled_squared_error_test() {
+    assert_eq!(
+        scaled_squared_error(&[2.0, 3.0, 5.0], &[2.0, -3.0, 0.0]),
+        27.0
+    );
 }

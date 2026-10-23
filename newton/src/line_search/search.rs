@@ -25,14 +25,17 @@
  *
  */
 
-// TODO: Remove once the port is complete
-#![allow(dead_code, unused_imports, unused_variables)]
+//! The line search itself: back off from the full Newton step while the
+//! model asserts, test the step with the Armijo condition and damp it with
+//! the quadratic and cubic interpolation, as `newtonAlgorithm` in the C
+//! runtime does.
 
 use super::TrialPoint;
 use super::cubic_interpolation::cubic_interpolation;
 use super::quadratic_interpolation::quadratic_interpolation;
 
 use nls_model::EvalError;
+use nls_model::scaling::{scaled_squared_error, squared_error};
 
 /// Smallest step factor the line search takes
 const LAMBDA_MIN: f64 = 1e-4;
@@ -199,29 +202,6 @@ pub(crate) struct Start {
 /// Errors at or below this are too close to the solution to damp the step
 const DAMPING_THRESHOLD: f64 = 1e-12;
 
-/// Squared error `‖f‖²` of a residual
-fn squared_error(f: &[f64]) -> f64 {
-    f.iter().map(|f| f * f).sum()
-}
-
-/// Squared scaled error `‖f / |res_scaling|‖²` of a residual. Entries with a
-/// scaling of zero stay unscaled, like `vecDivScaling` in the C runtime.
-fn scaled_squared_error(f: &[f64], res_scaling: &[f64]) -> f64 {
-    debug_assert_eq!(f.len(), res_scaling.len());
-
-    f.iter()
-        .zip(res_scaling)
-        .map(|(f, scaling)| {
-            let scaled = if scaling.abs() > 0.0 {
-                f / scaling.abs()
-            } else {
-                *f
-            };
-            scaled * scaled
-        })
-        .sum()
-}
-
 /// Whether the trial step `p1` is too long and must be damped.
 ///
 /// That is the case if both its error and its scaled error `p1_err_scaled`
@@ -284,21 +264,6 @@ mod line_search_tests {
         assert_eq!(cubic_interpolation(err, g, &p1, &p2), Some(f64::INFINITY));
 
         assert_eq!(cubic_step(err, g, &p1, &p2), 0.5);
-    }
-
-    #[test]
-    fn squared_error_test() {
-        assert_eq!(squared_error(&[3.0, -4.0]), 25.0);
-    }
-
-    #[test]
-    /// Entries are divided by the absolute scaling, a scaling of zero keeps
-    /// the entry unscaled
-    fn scaled_squared_error_test() {
-        assert_eq!(
-            scaled_squared_error(&[2.0, 3.0, 5.0], &[2.0, -3.0, 0.0]),
-            27.0
-        );
     }
 
     /// Start with the error `err` and the Newton slope `g = −2·err`, the same

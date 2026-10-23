@@ -125,6 +125,11 @@ where C has several return codes, for example `SolveStatus::Solved` and
 `SolvedDeterminantZero`. Errors of a lower crate are wrapped by the crate
 above with a `From` implementation, so `?` converts them.
 
+An error variant only exists if a caller would act on it differently. The
+line search backing off below `λ_min` is a `NewtonError::ModelError(Assert)`:
+the model asserted at every point tried, and C reports all Newton failures
+alike.
+
 ### Panics only for programming errors
 
 Wrong shapes or indices passed by the caller panic. Bad values from a model,
@@ -160,8 +165,10 @@ itself.
 ### `log` for messages
 
 The libraries write messages with the [`log`][log] crate and don't choose a
-logger. Solver messages use the target `NLS`. `homotopy_capi` will forward
-them to the `OMC_LOG_*` streams of the C runtime.
+logger. The target is the name of the C runtime's stream without the
+`OMC_LOG_` prefix, for example `NLS_V` for the Newton iteration, so
+`homotopy_capi` can forward them to the `OMC_LOG_*` streams. The Newton
+iteration logs each step with `trace!` and its result with `debug!`.
 
 ## Tests
 

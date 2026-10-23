@@ -25,8 +25,9 @@
  *
  */
 
-// TODO: Remove once the port is complete
-#![allow(dead_code)]
+//! Quadratic interpolation of the line search: the first damping step of
+//! `newtonAlgorithm` in the C runtime, when the full or backed off step failed
+//! the Armijo test.
 
 use super::TrialPoint;
 

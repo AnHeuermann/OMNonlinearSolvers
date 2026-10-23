@@ -25,9 +25,6 @@
  *
  */
 
-// TODO: Remove once the port is complete
-#![allow(dead_code)]
-
 //! Progress of a Newton iteration and the decision when to stop it, from the
 //! counters and exits of `newtonAlgorithm` in the C runtime.
 

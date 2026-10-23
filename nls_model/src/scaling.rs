@@ -34,6 +34,7 @@
 
 use faer::reborrow::{Reborrow, ReborrowMut};
 use faer::{MatMut, MatRef};
+use log::warn;
 
 /// Compute the variable scaling `factor[i] = max(nominal[i], |x[i]|)`.
 ///
@@ -128,4 +129,65 @@ pub fn columns(matrix: MatMut<'_, f64>, factor: &[f64]) {
     for (mut col, factor) in jacobian.col_iter_mut().zip(factor) {
         col *= factor;
     }
+}
+
+/// Replace infinite or NaN scaling factors with `1.0`, and log one warning if
+/// any were replaced.
+///
+/// A non-finite residual scaling would make the scaled error `0` or NaN, for
+/// example after a Jacobian entry overflowed. From `vecMakeFinite`.
+pub fn make_finite(x: &mut [f64]) {
+    let mut changed = false;
+    for elem in x.iter_mut() {
+        if !elem.is_finite() {
+            changed = true;
+            *elem = 1.0;
+        }
+    }
+    if changed {
+        warn!(target: "NLS_V", "Entry of the residual scaling is inf or NaN, set to 1.0");
+    }
+}
+
+/// Scale a solution `x̃` of a system with [`columns`] scaling back to the
+/// unknowns, `x = |factor|·x̃`. Entries with a factor of zero stay unscaled,
+/// like `vecMultScaling` in the C runtime.
+///
+/// # Panics
+///
+/// Panics if `scaled`, `factor` and `x` don't have the same length.
+pub fn unscale(scaled: &[f64], factor: &[f64], x: &mut [f64]) {
+    assert_eq!(scaled.len(), factor.len());
+    assert_eq!(scaled.len(), x.len());
+
+    for ((x, scaled), factor) in x.iter_mut().zip(scaled).zip(factor) {
+        *x = if factor.abs() > 0.0 {
+            scaled * factor.abs()
+        } else {
+            *scaled
+        };
+    }
+}
+
+/// Squared error `‖f‖²` of a residual
+pub fn squared_error(f: &[f64]) -> f64 {
+    f.iter().map(|f| f * f).sum()
+}
+
+/// Squared scaled error `‖f / |res_scaling|‖²` of a residual. Entries with a
+/// scaling of zero stay unscaled, like `vecDivScaling` in the C runtime.
+pub fn scaled_squared_error(f: &[f64], res_scaling: &[f64]) -> f64 {
+    debug_assert_eq!(f.len(), res_scaling.len());
+
+    f.iter()
+        .zip(res_scaling)
+        .map(|(f, scaling)| {
+            let scaled = if scaling.abs() > 0.0 {
+                f / scaling.abs()
+            } else {
+                *f
+            };
+            scaled * scaled
+        })
+        .sum()
 }

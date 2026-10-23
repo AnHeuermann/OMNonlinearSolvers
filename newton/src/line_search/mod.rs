@@ -36,6 +36,8 @@ mod cubic_interpolation;
 mod quadratic_interpolation;
 mod search;
 
+pub(crate) use search::{LineSearchError, Start, line_search};
+
 /// Trial point of the line search: a step factor `lambda` and its error
 /// `φ(lambda)`
 #[derive(Debug, Clone, Copy)]
