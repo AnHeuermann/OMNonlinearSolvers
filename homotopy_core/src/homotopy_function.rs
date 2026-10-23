@@ -105,32 +105,47 @@ impl<M: ModelFunctions> ModelFunctions for NewtonHomotopy<'_, M> {
 /// Its solution at `λ = 0` is the start point `x₀`. It needs as many
 /// residuals as unknowns. From `wrapper_fvec_homotopy_fixpoint` and
 /// `wrapper_fvec_homotopy_fixpoint_der` of the C runtime.
+///
+/// Its Jacobian reproduces a scaling of the C runtime: C scales the columns
+/// of `J` by the variable scaling `S` before adding the identity, so the path
+/// following solves with `λ·J·S + (1 − λ)·I` instead of the consistently
+/// scaled `(λ·J + (1 − λ)·I)·S`. The two only agree where `S = I`.
 pub struct FixpointHomotopy<'m, M> {
     model: EvaluatedModel<'m, M>,
     /// The start point `x₀`
     x0: Box<[f64]>,
+    /// The variable scaling `S` the path following scales the columns of the
+    /// Jacobian with
+    x_scaling: Box<[f64]>,
     /// The model's info with `λ` as additional unknown
     info: SystemInfo,
 }
 
 impl<'m, M: ModelFunctions> FixpointHomotopy<'m, M> {
-    /// Creates the fixpoint homotopy of `model` from the start point `x0`.
+    /// Creates the fixpoint homotopy of `model` from the start point `x0`,
+    /// for a path following that scales the unknowns `x` with `x_scaling`.
     ///
     /// # Panics
     ///
     /// Panics if `model` doesn't have as many residuals as unknowns, or `x0`
-    /// doesn't have one entry per unknown.
-    pub fn new(model: &'m mut M, x0: &[f64]) -> Self {
+    /// or `x_scaling` don't have one entry per unknown.
+    pub fn new(model: &'m mut M, x0: &[f64], x_scaling: &[f64]) -> Self {
         let info = model.info();
         assert_eq!(
             info.num_residuals, info.num_unknowns,
             "Fixpoint homotopy needs a square system"
         );
         assert_eq!(x0.len(), info.num_unknowns, "Start point has wrong length");
+        assert_eq!(
+            x_scaling.len(),
+            info.num_unknowns,
+            "Scaling has wrong length"
+        );
         FixpointHomotopy {
             info: with_lambda(info),
             model: EvaluatedModel::new(model),
             x0: x0.into(),
+            x_scaling: x_scaling.into(),
         }
     }
 }
@@ -149,7 +164,11 @@ impl<M: ModelFunctions> ModelFunctions for FixpointHomotopy<'_, M> {
         Ok(())
     }
 
-    /// `[∂H/∂x | ∂H/∂λ] = [λ·J(x) + (1 − λ)·I | F(x) − (x − x₀)]`
+    /// `[∂H/∂x | ∂H/∂λ] = [λ·J(x) + (1 − λ)·S⁻¹ | F(x) − (x − x₀)]`
+    ///
+    /// The identity part is divided by the variable scaling `S`, so that the
+    /// column scaling of the path following turns it into C's
+    /// `λ·J·S + (1 − λ)·I`. Entries with a scaling of zero keep `1 − λ`.
     fn derivative(
         &mut self,
         y: &[f64],
@@ -161,8 +180,10 @@ impl<M: ModelFunctions> ModelFunctions for FixpointHomotopy<'_, M> {
         self.model.derivative(x, jx.rb_mut())?;
 
         jx *= faer::Scale(lambda);
-        for d in jx.diagonal_mut().column_vector_mut().iter_mut() {
-            *d += 1.0 - lambda;
+        let diagonal = jx.diagonal_mut().column_vector_mut();
+        for (d, scaling) in diagonal.iter_mut().zip(&self.x_scaling) {
+            let identity = if *scaling > 0.0 { 1.0 / scaling } else { 1.0 };
+            *d += (1.0 - lambda) * identity;
         }
         let f = self.model.f();
         for (((dh, f), x), x0) in jlambda.col_mut(0).iter_mut().zip(f).zip(x).zip(&self.x0) {
@@ -343,7 +364,7 @@ mod homotopy_function_tests {
     fn fixpoint_start_test() {
         let calls = Cell::new(0);
         let mut model = model(&calls);
-        let mut homotopy = FixpointHomotopy::new(&mut model, &X0);
+        let mut homotopy = FixpointHomotopy::new(&mut model, &X0, &[1.0, 1.0]);
 
         assert_eq!(h(&mut homotopy, &[X0[0], X0[1], 0.0]), [0.0, 0.0]);
         assert_eq!(h(&mut homotopy, &[3.0, -1.0, 0.0]), [1.0, -2.0]);
@@ -354,18 +375,18 @@ mod homotopy_function_tests {
     fn fixpoint_end_test() {
         let calls = Cell::new(0);
         let mut model = model(&calls);
-        let mut homotopy = FixpointHomotopy::new(&mut model, &X0);
+        let mut homotopy = FixpointHomotopy::new(&mut model, &X0, &[1.0, 1.0]);
 
         assert_eq!(h(&mut homotopy, &[0.5, -1.0, 1.0]), f(&[0.5, -1.0]));
     }
 
     #[test]
-    /// `[λ·J(x) + (1 − λ)·I | F(x) − (x − x₀)]` matches central differences
-    /// of `H`
+    /// Without scaling, `[λ·J(x) + (1 − λ)·I | F(x) − (x − x₀)]` matches
+    /// central differences of `H`
     fn fixpoint_derivative_test() {
         let calls = Cell::new(0);
         let mut model = model(&calls);
-        let mut homotopy = FixpointHomotopy::new(&mut model, &X0);
+        let mut homotopy = FixpointHomotopy::new(&mut model, &X0, &[1.0, 1.0]);
         let y = [1.5, 0.5, 0.3];
 
         let jac = jacobian(&mut homotopy, &y);
@@ -376,10 +397,35 @@ mod homotopy_function_tests {
     }
 
     #[test]
+    /// With the scaling `S = diag(2, 4)` the column scaling of the path
+    /// following turns the Jacobian into C's `λ·J·S + (1 − λ)·I`
+    fn fixpoint_derivative_scaling_test() {
+        let calls = Cell::new(0);
+        let mut model = model(&calls);
+        let x_scaling = [2.0, 4.0];
+        let mut homotopy = FixpointHomotopy::new(&mut model, &X0, &x_scaling);
+        let y = [1.5, 0.5, 0.25];
+
+        let mut jac = jacobian(&mut homotopy, &y);
+        nls_model::scaling::columns(jac.as_mut(), &x_scaling);
+
+        // J(1.5, 0.5) = [[3, 1], [0.5, 1.5]], λ = 0.25
+        let expected = [
+            [0.25 * 3.0 * 2.0 + 0.75, 0.25 * 1.0 * 4.0],
+            [0.25 * 0.5 * 2.0, 0.25 * 1.5 * 4.0 + 0.75],
+        ];
+        for (i, row) in expected.iter().enumerate() {
+            for (j, value) in row.iter().enumerate() {
+                assert!((jac[(i, j)] - value).abs() < 1e-6, "({i}, {j}): {jac:?}");
+            }
+        }
+    }
+
+    #[test]
     #[should_panic = "Fixpoint homotopy needs a square system"]
     fn fixpoint_not_square_test() {
         let mut model = ClosureModel::new(1, 2, |_: &[f64], _: &mut [f64]| Ok(()));
-        let _ = FixpointHomotopy::new(&mut model, &[0.0, 0.0]);
+        let _ = FixpointHomotopy::new(&mut model, &[0.0, 0.0], &[1.0, 1.0]);
     }
 
     #[test]
@@ -433,7 +479,7 @@ mod homotopy_function_tests {
             res[0] = x[0];
             Ok(())
         });
-        let mut homotopy = FixpointHomotopy::new(&mut model, &[1.0]);
+        let mut homotopy = FixpointHomotopy::new(&mut model, &[1.0], &[1.0]);
         let mut res = [0.0];
         let mut jac = Mat::zeros(1, 2);
 

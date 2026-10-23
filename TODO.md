@@ -33,6 +33,11 @@
   back to the path orthogonally to the tangent, with the extended system of
   `orthogonalBacktraceMatrix`. Only strategy 1, the default, fixing one
   coordinate, is ported.
+* Fix the scaling of the fixpoint homotopy's Jacobian once there is a test
+  oracle against the C runtime of OpenModelica. C scales the columns of `J`
+  before adding the identity, so the path following solves with
+  `λ·J·S + (1 − λ)·I` instead of `(λ·J + (1 − λ)·I)·S`. `FixpointHomotopy`
+  reproduces that, see its doc comment.
 * Implement OpenModelica-like logging. The target is the C stream without the
   `OMC_LOG_` prefix and the `_V` suffix, and a verbose stream becomes `trace!`
   unless the message is a clear error. So
