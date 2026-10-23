@@ -30,6 +30,7 @@
 
 pub mod settings;
 
+mod corrector;
 mod homotopy_function;
 mod predictor;
 mod tangent;
