@@ -25,9 +25,6 @@
  *
  */
 
-// TODO: Remove once the path follower uses it
-#![allow(dead_code)]
-
 //! The predictor step along the tangent of the homotopy path.
 
 use crate::settings::Settings;

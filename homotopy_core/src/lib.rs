@@ -32,8 +32,10 @@ pub mod settings;
 
 mod corrector;
 mod homotopy_function;
+mod path_follower;
 mod predictor;
 mod step_control;
 mod tangent;
 
 pub use homotopy_function::{FixpointHomotopy, NewtonHomotopy};
+pub use path_follower::{Direction, PathError, follow_path};

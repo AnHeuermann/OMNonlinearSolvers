@@ -25,9 +25,6 @@
  *
  */
 
-// TODO: Remove once the path follower uses it
-#![allow(dead_code)]
-
 //! The tangent of the homotopy path, the direction of the predictor step.
 
 use faer::Mat;

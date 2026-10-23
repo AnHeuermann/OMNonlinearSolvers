@@ -25,9 +25,6 @@
  *
  */
 
-// TODO: Remove once the path follower uses it
-#![allow(dead_code)]
-
 //! The corrector step back to the homotopy path, strategy 1 of the C runtime:
 //! Newton's method with one coordinate fixed.
 
@@ -49,14 +46,14 @@ pub(crate) enum Correction {
 #[derive(Debug)]
 pub(crate) enum CorrectorError {
     /// The homotopy or its Jacobian can't be evaluated
-    ModelError(EvalError),
+    ModelError,
     /// The linear system of a Newton step has no solution
     Singular,
 }
 
 impl From<EvalError> for CorrectorError {
-    fn from(error: EvalError) -> Self {
-        CorrectorError::ModelError(error)
+    fn from(_: EvalError) -> Self {
+        CorrectorError::ModelError
     }
 }
 
@@ -296,7 +293,7 @@ mod corrector_tests {
         let (result, _, _) = correct(asserting, [1.0, 0.6], 1, 20);
 
         assert!(
-            matches!(result, Err(CorrectorError::ModelError(EvalError::Assert))),
+            matches!(result, Err(CorrectorError::ModelError)),
             "got {result:?}"
         );
     }

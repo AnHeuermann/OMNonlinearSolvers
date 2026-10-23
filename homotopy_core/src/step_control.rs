@@ -25,9 +25,6 @@
  *
  */
 
-// TODO: Remove once the path follower uses it
-#![allow(dead_code)]
-
 //! The step size control of the homotopy path following.
 
 use crate::settings::Settings;
