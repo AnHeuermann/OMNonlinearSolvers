@@ -8,7 +8,30 @@ for the OpenModelica project.
 
 ## Solve NLS
 
-Not yet implemented.
+A nonlinear system `F(x) = 0` implements `ModelFunctions` of the `nls_model`
+crate: its sizes and nominal values, and how to evaluate `F`. The Jacobian
+defaults to forward differences. `HomotopySolver` of the `homotopy_core`
+crate solves it like the C runtime: Newton's method from the start point, and
+if that fails Newton's method from the end of a homotopy path.
+
+```rust
+use homotopy_core::HomotopySolver;
+use homotopy_core::settings::Settings;
+use newton::settings::Settings as NewtonSettings;
+
+let mut solver = HomotopySolver::new(size, NewtonSettings::new(size), Settings::new(size));
+let how = solver.solve(&mut model, &mut x)?;
+```
+
+[homotopy_core/examples/solve.rs](homotopy_core/examples/solve.rs) is a
+complete example, run it with
+
+```sh
+cargo run --example solve -p homotopy_core
+```
+
+A system Newton's method solves on its own can also use `newton::solve`
+directly.
 
 ## Contributing
 

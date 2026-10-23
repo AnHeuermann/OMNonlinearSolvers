@@ -27,6 +27,37 @@
 
 //! The homotopy algorithm of `nonlinearSolverHomotopy.c`, built on the Newton
 //! solver of the `newton` crate.
+//!
+//! [`HomotopySolver`] solves a system `F(x) = 0` like the C runtime: Newton's
+//! method from the start point first, and if that fails Newton's method from
+//! the end of the path of a homotopy. The system implements
+//! [`nls_model::ModelFunctions`].
+//!
+//! # Example
+//!
+//! `x³ − 2x + 2 = 0` from `x = 0`, where Newton's method alone gets stuck:
+//!
+//! ```
+//! use homotopy_core::settings::Settings;
+//! use homotopy_core::{HomotopyRun, HomotopySolver, Solved};
+//! use newton::settings::Settings as NewtonSettings;
+//! use nls_model::ClosureModel;
+//!
+//! let mut model = ClosureModel::new(1, 1, |x: &[f64], res: &mut [f64]| {
+//!     res[0] = x[0].powi(3) - 2.0 * x[0] + 2.0;
+//!     Ok(())
+//! });
+//! let mut solver = HomotopySolver::new(1, NewtonSettings::new(1), Settings::new(1));
+//!
+//! let mut x = [0.0];
+//! let how = solver.solve(&mut model, &mut x).unwrap();
+//!
+//! assert_eq!(how, Solved::Homotopy(HomotopyRun::NewtonNegative));
+//! assert!((x[0] + 1.769_292_354_238_631).abs() < 1e-10);
+//! ```
+//!
+//! `homotopy_core/examples/solve.rs` shows the same system as a type of its
+//! own.
 
 pub mod settings;
 
