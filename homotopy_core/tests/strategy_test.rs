@@ -367,3 +367,27 @@ fn fallback_casual_tearing_set_test() {
     );
     assert_eq!(calls, 0);
 }
+
+#[test]
+/// Newton's method starts with the step of the start point check, like in the
+/// C runtime, so neither `F` nor its forward difference is evaluated at the
+/// start point again
+fn evaluations_test() {
+    let points = std::cell::RefCell::new(Vec::new());
+    let mut model = ClosureModel::new(1, 1, |x: &[f64], f: &mut [f64]| {
+        points.borrow_mut().push(x[0]);
+        f[0] = x[0] - 2.0;
+        Ok(())
+    });
+    let mut x = [0.0];
+
+    let result = solver(1).solve(&mut model, &mut x);
+
+    assert!(matches!(result, Ok(Solved::Newton)), "got {result:?}");
+    let points = points.borrow();
+    let near_start = points.iter().filter(|x| x.abs() < 1e-6).count();
+    assert_eq!(
+        near_start, 2,
+        "F(x₀) and one forward difference: {points:?}"
+    );
+}

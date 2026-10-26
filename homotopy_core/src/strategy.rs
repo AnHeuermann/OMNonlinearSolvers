@@ -30,13 +30,11 @@
 use crate::path_follower::{Direction, NoObserver, PathObserver, follow_path};
 use crate::settings::Settings;
 use crate::{FixpointHomotopy, NewtonHomotopy};
-use faer::{ColRef, Mat};
 use log::debug;
-use newton::NewtonWorkspace;
 use newton::settings::Settings as NewtonSettings;
+use newton::{NewtonError, NewtonWorkspace};
 use nls_model::scaling::{self, scaled_squared_error, squared_error};
 use nls_model::{EvalError, ModelFunctions};
-use total_pivot_solver::SolveError;
 
 /// A start point is already a solution if its squared error is below this
 /// factor times `f_tol²`
@@ -131,9 +129,12 @@ impl From<EvalError> for PointError {
     }
 }
 
-impl From<SolveError> for PointError {
-    fn from(_: SolveError) -> Self {
-        PointError::Singular
+impl From<NewtonError> for PointError {
+    fn from(error: NewtonError) -> Self {
+        match error {
+            NewtonError::ModelError(error) => PointError::ModelError(error),
+            _ => PointError::Singular,
+        }
     }
 }
 
@@ -141,8 +142,12 @@ impl From<SolveError> for PointError {
 enum Start {
     /// The start point solves the system
     Solved,
-    /// Newton's method and the homotopies can start from it
+    /// Newton's method and the homotopies can start from it, with the first
+    /// Newton step prepared
     Ready,
+    /// Like `Ready`, but the first linear system is singular, so Newton's
+    /// method can't start
+    Singular,
 }
 
 /// Statistics of the latest solve of a [`HomotopySolver`].
@@ -172,10 +177,9 @@ pub struct HomotopySolver {
     x_newton: Box<[f64]>,
     /// `F(x₀)`
     fx0: Box<[f64]>,
-    /// Variable scaling of the `n` unknowns and `λ`
+    /// Variable scaling of the `n` unknowns and `λ`, Newton's method uses it
+    /// too
     x_scaling: Box<[f64]>,
-    /// The linear system `[J | f]` the start point is checked with
-    jacobian: Mat<f64>,
     /// Residual scaling of the latest successful solve, zero otherwise. Only
     /// the test of an already solved start point uses it.
     res_scaling: Box<[f64]>,
@@ -199,7 +203,6 @@ impl HomotopySolver {
             x_newton: vec![0.0; size].into(),
             fx0: vec![0.0; size].into(),
             x_scaling: vec![1.0; size + 1].into(),
-            jacobian: Mat::zeros(size, size + 1),
             res_scaling: vec![0.0; size].into(),
             statistics: Statistics::default(),
         }
@@ -269,6 +272,7 @@ impl HomotopySolver {
         self.x_start.copy_from_slice(x);
         scaling::variables(&model.info().nominal, x, &mut self.x_scaling[..n]);
         self.x_scaling[n] = 1.0;
+        self.newton.set_x_scaling(&self.x_scaling[..n]);
         self.statistics = Statistics::default();
 
         let result = self.solve_from_start(model, observer, fallback, x);
@@ -382,7 +386,8 @@ impl HomotopySolver {
             return Ok(Solved::StartPoint);
         }
 
-        match self.newton_then_fallback(model, fallback, x) {
+        let prepared = matches!(start, Start::Ready);
+        match self.newton_then_fallback(model, fallback, prepared, x) {
             Some(Solver::Newton) => return Ok(Solved::Newton),
             Some(Solver::Fallback) => return Ok(Solved::Fallback),
             None => {}
@@ -402,12 +407,10 @@ impl HomotopySolver {
             };
             // The C runtime gives up if the end of a path can't start Newton's
             // method
-            model
-                .eval(x, &mut self.fx0)
+            newton::evaluate(model, x, &mut self.newton).map_err(|_| HomotopyError::NotSolved)?;
+            newton::prepare_step(model, x, false, &mut self.newton)
                 .map_err(|_| HomotopyError::NotSolved)?;
-            check_linear_system(model, x, &self.fx0, &self.x_scaling, &mut self.jacobian)
-                .map_err(|_| HomotopyError::NotSolved)?;
-            match self.newton_then_fallback(model, fallback, x) {
+            match self.newton_then_fallback(model, fallback, true, x) {
                 Some(Solver::Newton) => {
                     self.statistics.path_steps = steps;
                     return Ok(Solved::Homotopy(run));
@@ -437,25 +440,19 @@ impl HomotopySolver {
                 }
             }
 
-            let checked = model
-                .eval(&self.x0, &mut self.fx0)
-                .map_err(PointError::from);
-            let checked = checked.and_then(|()| {
-                let solved = squared_error(&self.fx0) < f_tol_squared * SOLVED_AT_START_FACTOR
-                    || scaled_squared_error(&self.fx0, &self.res_scaling)
-                        < f_tol_squared * SOLVED_AT_START_FACTOR;
-                if solved {
-                    return Ok(Start::Solved);
-                }
-                check_linear_system(
-                    model,
-                    &self.x0,
-                    &self.fx0,
-                    &self.x_scaling,
-                    &mut self.jacobian,
-                )?;
-                Ok(Start::Ready)
-            });
+            let checked = newton::evaluate(model, &self.x0, &mut self.newton)
+                .map_err(PointError::from)
+                .and_then(|()| {
+                    self.fx0.copy_from_slice(self.newton.f());
+                    let solved = squared_error(&self.fx0) < f_tol_squared * SOLVED_AT_START_FACTOR
+                        || scaled_squared_error(&self.fx0, &self.res_scaling)
+                            < f_tol_squared * SOLVED_AT_START_FACTOR;
+                    if solved {
+                        return Ok(Start::Solved);
+                    }
+                    newton::prepare_step(model, &self.x0, true, &mut self.newton)?;
+                    Ok(Start::Ready)
+                });
 
             match checked {
                 Ok(start) => return Ok(start),
@@ -469,25 +466,27 @@ impl HomotopySolver {
                     return Err(HomotopyError::NotSolved);
                 }
                 // Like the C runtime, a singular system at the last moved
-                // start point is left to Newton's method and the homotopies
-                Err(PointError::Singular) if last_attempt => return Ok(Start::Ready),
+                // start point is left to the fallback and the homotopies
+                Err(PointError::Singular) if last_attempt => return Ok(Start::Singular),
                 Err(_) => {}
             }
         }
         unreachable!("the last attempt returns")
     }
 
-    /// Newton's method from `x`, and if it fails `fallback` from the same
-    /// start point, except for a casual tearing set. Returns the solver that
-    /// solved, `x` holds the solution then.
+    /// Newton's method from `x` with the step prepared at `x`, and if it fails
+    /// or isn't `prepared`, `fallback` from the same start point, except for a
+    /// casual tearing set. Returns the solver that solved, `x` holds the
+    /// solution then.
     fn newton_then_fallback<M: ModelFunctions>(
         &mut self,
         model: &mut M,
         fallback: &mut impl Fallback,
+        prepared: bool,
         x: &mut [f64],
     ) -> Option<Solver> {
         self.x_newton.copy_from_slice(x);
-        if self.newton(model, x) {
+        if prepared && self.newton(model, x) {
             return Some(Solver::Newton);
         }
         if model.info().casual_tearing_set {
@@ -501,9 +500,10 @@ impl HomotopySolver {
         None
     }
 
-    /// Newton's method from `x`. Keeps its residual scaling on success.
+    /// Newton's method from `x`, with the step prepared at `x`. Keeps its
+    /// residual scaling on success.
     fn newton<M: ModelFunctions>(&mut self, model: &mut M, x: &mut [f64]) -> bool {
-        let result = newton::solve(model, x, &self.newton_settings, &mut self.newton);
+        let result = newton::solve_prepared(model, x, &self.newton_settings, &mut self.newton);
         self.statistics.newton_iterations += self.newton.iterations();
         match result {
             Ok(_) => {
@@ -560,26 +560,4 @@ impl HomotopySolver {
             }
         }
     }
-}
-
-/// Evaluate the Jacobian at `x` with the residual `f = F(x)` and solve its
-/// scaled linear system `[J | f]`, the first Newton step from `x`.
-///
-/// The C runtime solves it as the first step of its Newton iteration. Here
-/// [`newton::solve`] sets up its own, so it only tells whether Newton's method
-/// can start from `x`.
-fn check_linear_system<M: ModelFunctions>(
-    model: &mut M,
-    x: &[f64],
-    f: &[f64],
-    x_scaling: &[f64],
-    jacobian: &mut Mat<f64>,
-) -> Result<(), PointError> {
-    let n = x.len();
-    model.derivative(x, f, jacobian.as_mut().subcols_mut(0, n))?;
-    jacobian.col_mut(n).copy_from(ColRef::from_slice(f));
-    scaling::columns(jacobian.as_mut(), &x_scaling[..n]);
-    scaling::rows(jacobian.as_mut());
-    total_pivot_solver::solve(jacobian, Some(n), model.info().casual_tearing_set)?;
-    Ok(())
 }

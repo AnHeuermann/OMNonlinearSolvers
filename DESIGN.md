@@ -23,6 +23,11 @@ systems converge would change simulation results in OpenModelica.
   the C function where they are not obvious.
 * Deviations from C are deliberate and documented where they are made, for
   example rejecting a matrix with NaN before the elimination.
+* If the linear system of the start point is still singular after the
+  retries with moved start points, C starts Newton's method anyway, with the
+  step its failed solve left behind. The strategy skips Newton's method then
+  and goes on with the fallback and the homotopies, see
+  `HomotopySolver::check_start`.
 
 ## Structure
 

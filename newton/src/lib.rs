@@ -34,4 +34,6 @@ mod error_history;
 mod line_search;
 mod tracker;
 
-pub use solve::{NewtonError, NewtonStatus, NewtonWorkspace, solve};
+pub use solve::{
+    NewtonError, NewtonStatus, NewtonWorkspace, evaluate, prepare_step, solve, solve_prepared,
+};

@@ -89,6 +89,21 @@ impl NewtonWorkspace {
     pub fn iterations(&self) -> usize {
         self.iterations
     }
+
+    /// The residual `F(x)` of the latest evaluation, see [`evaluate`].
+    pub fn f(&self) -> &[f64] {
+        &self.f
+    }
+
+    /// Set the variable scaling for [`prepare_step`] and [`solve_prepared`],
+    /// one factor per unknown. [`solve`] sets it itself.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `x_scaling` doesn't have one factor per unknown.
+    pub fn set_x_scaling(&mut self, x_scaling: &[f64]) {
+        self.x_scaling.copy_from_slice(x_scaling);
+    }
 }
 
 /// How a successful [`solve`] ended.
@@ -161,7 +176,8 @@ impl From<LineSearchError> for NewtonError {
 /// ```
 ///
 /// The unknowns are scaled with their nominal values or magnitudes at the
-/// start point, the residuals with the row sums of the Jacobian. From
+/// start point, the residuals with the row sums of the Jacobian. It is
+/// [`evaluate`], [`prepare_step`] and [`solve_prepared`] in a row. From
 /// `newtonAlgorithm` of the C runtime, together with the setup in
 /// `solveHomotopy` before it.
 ///
@@ -179,28 +195,92 @@ pub fn solve<M: ModelFunctions>(
     settings: &Settings,
     work: &mut NewtonWorkspace,
 ) -> Result<NewtonStatus, NewtonError> {
+    assert_eq!(
+        x.len(),
+        model.info().num_unknowns,
+        "Start point has wrong length"
+    );
+    scaling::variables(&model.info().nominal, x, &mut work.x_scaling);
+    work.iterations = 0;
+    evaluate(model, x, work)?;
+    prepare_step(model, x, true, work)?;
+    solve_prepared(model, x, settings, work)
+}
+
+/// Evaluate `F(x)` into `work`, see [`NewtonWorkspace::f`].
+///
+/// # Errors
+///
+/// Returns the [`EvalError`] of the model if `F` can't be evaluated at `x`.
+pub fn evaluate<M: ModelFunctions>(
+    model: &mut M,
+    x: &[f64],
+    work: &mut NewtonWorkspace,
+) -> Result<(), EvalError> {
+    model.eval(x, &mut work.f)
+}
+
+/// Prepare the first Newton step at `x`, with `F(x)` from [`evaluate`] in
+/// `work`.
+///
+/// Evaluates the Jacobian, scales its columns with the variable scaling of
+/// `work`, computes the residual scaling and solves the linear system for the
+/// step. With `make_finite`, non-finite factors of the residual scaling
+/// become 1, as `solveHomotopy` does at the start point. Like there, a
+/// vanishing determinant of this system is ignored.
+///
+/// # Errors
+///
+/// Returns [`NewtonError::ModelError`] if the Jacobian can't be evaluated and
+/// [`NewtonError::Singular`] if the linear system can't be solved.
+pub fn prepare_step<M: ModelFunctions>(
+    model: &mut M,
+    x: &[f64],
+    make_finite: bool,
+    work: &mut NewtonWorkspace,
+) -> Result<(), NewtonError> {
+    refresh_jacobian(model, x, work)?;
+    if make_finite {
+        scaling::make_finite(&mut work.res_scaling);
+    }
+    solve_step(model.info().casual_tearing_set, work)?;
+    Ok(())
+}
+
+/// Solve `F(x) = 0` from `x`, starting with the step [`prepare_step`] left in
+/// `work` for `x`.
+///
+/// Like [`solve`] after its setup. The caller sets the variable scaling, see
+/// [`NewtonWorkspace::set_x_scaling`].
+///
+/// # Errors
+///
+/// Like [`solve`].
+///
+/// # Panics
+///
+/// Panics if `x` or `work` don't match the size of the model.
+pub fn solve_prepared<M: ModelFunctions>(
+    model: &mut M,
+    x: &mut [f64],
+    settings: &Settings,
+    work: &mut NewtonWorkspace,
+) -> Result<NewtonStatus, NewtonError> {
     let n = model.info().num_unknowns;
     let casual_tearing_set = model.info().casual_tearing_set;
     assert_eq!(x.len(), n, "Start point has wrong length");
     assert_eq!(work.x1.len(), n, "Workspace has wrong size");
 
-    scaling::variables(&model.info().nominal, x, &mut work.x_scaling);
     work.iterations = 0;
-    evaluate_start(model, x, work)?;
-
     let mut err = squared_error(&work.f);
     let mut err_scaled = scaled_squared_error(&work.f, &work.res_scaling);
     let mut tracker = Tracker::new(settings, err, err_scaled);
     trace!(target: "NLS", "Newton iteration started, error {err:e}, scaled {err_scaled:e}");
 
+    // The determinant of the step of `prepare_step` is ignored
+    let mut determinant_zero = false;
     for iteration in 1.. {
         work.iterations = iteration;
-        let solution = total_pivot_solver::solve(&mut work.jacobian, Some(n), casual_tearing_set)?;
-        // The C runtime ignores a vanishing determinant of the first linear
-        // system, which `solveHomotopy` solves before the iteration starts
-        let determinant_zero =
-            iteration > 1 && matches!(solution.status, SolveStatus::SolvedDeterminantZero);
-        scaling::unscale(&solution.x[..n], &work.x_scaling, &mut work.dy);
 
         let start = Start {
             err,
@@ -252,30 +332,22 @@ pub fn solve<M: ModelFunctions>(
 
         x.copy_from_slice(&work.x1);
         refresh_jacobian(model, x, work)?;
+        determinant_zero = solve_step(casual_tearing_set, work)?;
     }
     unreachable!("the tracker stops after the maximum number of iterations")
 }
 
-/// Evaluate the start point `x` and set up the first linear system.
-///
-/// Writes `F(x)` into `work.f`, and the scaled `[J | f]` and the residual
-/// scaling as [`refresh_jacobian`] does. Non-finite factors of the residual
-/// scaling are set to 1, like `solveHomotopy` does before the C Newton
-/// iteration starts.
-///
-/// # Errors
-///
-/// Returns the [`EvalError`] of the model if `F` or `J` can't be evaluated at
-/// `x`.
-fn evaluate_start<M: ModelFunctions>(
-    model: &mut M,
-    x: &[f64],
-    work: &mut NewtonWorkspace,
-) -> Result<(), EvalError> {
-    model.eval(x, &mut work.f)?;
-    refresh_jacobian(model, x, work)?;
-    scaling::make_finite(&mut work.res_scaling);
-    Ok(())
+/// Solve the scaled linear system `[J | f]` of `work` for the Newton step
+/// `dy`, scaled back to the unknowns. Returns whether the determinant of a
+/// casual tearing set vanishes.
+fn solve_step(casual_tearing_set: bool, work: &mut NewtonWorkspace) -> Result<bool, SolveError> {
+    let n = work.dy.len();
+    let solution = total_pivot_solver::solve(&mut work.jacobian, Some(n), casual_tearing_set)?;
+    scaling::unscale(&solution.x[..n], &work.x_scaling, &mut work.dy);
+    Ok(matches!(
+        solution.status,
+        SolveStatus::SolvedDeterminantZero
+    ))
 }
 
 /// Set up the linear system `[J | f]` of the next Newton step at `x`.
