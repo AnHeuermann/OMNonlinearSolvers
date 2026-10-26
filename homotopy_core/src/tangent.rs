@@ -55,8 +55,8 @@ impl From<SolveError> for TangentError {
 /// Compute the tangent `t` of the path `H(y) = 0` at `y = (x, λ)`.
 ///
 /// The tangent solves `[∂H/∂x | ∂H/∂λ]·t = 0`. The `n×(n+1)` Jacobian is
-/// evaluated into `jacobian` with `h = H(y)`, its columns scaled with
-/// `x_scaling` and its rows with their largest entry. The total pivot solver
+/// evaluated into `jacobian` with `h = H(y)` and its columns scaled with
+/// `x_scaling`, then its rows are scaled with their largest entry. The total pivot solver
 /// fixes the entry of `t` it chooses to 1, and `t` is scaled back to the
 /// unknowns. It is neither normalized nor oriented, see [`orient`].
 ///
@@ -87,9 +87,7 @@ pub(crate) fn tangent(
         "Homotopy needs λ as last unknown"
     );
 
-    homotopy.derivative(y, h, jacobian.as_mut())?;
-    // λ has the scaling 1, so only the columns of ∂H/∂x change
-    scaling::columns(jacobian.as_mut(), &x_scaling[..n]);
+    homotopy.derivative(y, h, x_scaling, jacobian.as_mut())?;
     scaling::rows(jacobian.as_mut());
 
     let solution = total_pivot_solver::solve(jacobian, None, homotopy.info().casual_tearing_set)?;
@@ -154,10 +152,11 @@ mod tangent_tests {
             &mut self,
             _: &[f64],
             _: &[f64],
+            y_scaling: &[f64],
             mut jacobian: MatMut<'_, f64>,
         ) -> Result<(), EvalError> {
-            jacobian[(0, 0)] = 1.0;
-            jacobian[(0, 1)] = -self.c;
+            jacobian[(0, 0)] = y_scaling[0];
+            jacobian[(0, 1)] = -self.c * y_scaling[1];
             Ok(())
         }
     }

@@ -223,7 +223,7 @@ pub fn evaluate<M: ModelFunctions>(
 /// Prepare the first Newton step at `x`, with `F(x)` from [`evaluate`] in
 /// `work`.
 ///
-/// Evaluates the Jacobian, scales its columns with the variable scaling of
+/// Evaluates the Jacobian with its columns scaled by the variable scaling of
 /// `work`, computes the residual scaling and solves the linear system for the
 /// step. With `make_finite`, non-finite factors of the residual scaling
 /// become 1, as `solveHomotopy` does at the start point. Like there, a
@@ -353,10 +353,10 @@ fn solve_step(casual_tearing_set: bool, work: &mut NewtonWorkspace) -> Result<bo
 /// Set up the linear system `[J | f]` of the next Newton step at `x`.
 ///
 /// Expects `F(x)` in `work.f`, as the line search leaves it. Evaluates the
-/// Jacobian `J(x)` into `work.jacobian`, with `f` as its last column, scales
-/// the columns with `work.x_scaling`, computes `work.res_scaling` from the
-/// column-scaled `J` and finally scales the rows. From the end of the loop in
-/// `newtonAlgorithm`.
+/// Jacobian `J(x)`, with its columns scaled by `work.x_scaling`, into
+/// `work.jacobian`, with `f` as its last column, computes `work.res_scaling`
+/// from the column-scaled `J` and finally scales the rows. From the end of
+/// the loop in `newtonAlgorithm`.
 ///
 /// # Errors
 ///
@@ -369,12 +369,11 @@ fn refresh_jacobian<M: ModelFunctions>(
 ) -> Result<(), EvalError> {
     let jacobian = work.jacobian.subcols_mut(0, work.jacobian.nrows());
 
-    model.derivative(x, &work.f, jacobian)?;
+    model.derivative(x, &work.f, &work.x_scaling, jacobian)?;
     work.jacobian
         .col_mut(work.jacobian.nrows())
         .copy_from(ColRef::from_slice(&work.f));
 
-    scaling::columns(work.jacobian.as_mut(), &work.x_scaling);
     scaling::residuals(work.jacobian.as_ref(), &mut work.res_scaling);
     scaling::rows(work.jacobian.as_mut());
     Ok(())

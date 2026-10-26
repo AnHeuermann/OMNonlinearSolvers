@@ -134,8 +134,7 @@ pub(crate) fn corrector(
             return Ok(Correction::Converged);
         }
 
-        homotopy.derivative(y, h, work.jacobian.as_mut())?;
-        scaling::columns(work.jacobian.as_mut(), &work.x_scaling[..n]);
+        homotopy.derivative(y, h, &work.x_scaling, work.jacobian.as_mut())?;
         row_sums(work.jacobian.as_ref(), &mut work.res_scaling);
 
         work.jacobian

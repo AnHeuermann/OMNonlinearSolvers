@@ -526,7 +526,6 @@ impl HomotopySolver {
         observer: &mut impl PathObserver,
         x: &mut [f64],
     ) -> Result<usize, crate::PathError> {
-        let n = self.x0.len();
         let f_tol = self.newton_settings.f_tol();
         match run {
             HomotopyRun::NewtonPositive | HomotopyRun::NewtonNegative => {
@@ -547,7 +546,7 @@ impl HomotopySolver {
                 )
             }
             HomotopyRun::Fixpoint => {
-                let mut homotopy = FixpointHomotopy::new(model, &self.x0, &self.x_scaling[..n]);
+                let mut homotopy = FixpointHomotopy::new(model, &self.x0);
                 follow_path(
                     &mut homotopy,
                     &self.x_scaling,

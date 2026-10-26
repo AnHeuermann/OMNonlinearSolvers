@@ -95,6 +95,9 @@ pointers.
 * The Jacobian defaults to forward differences with the step of the C
   runtime, stepping backwards at an upper bound. Systems with an analytical
   Jacobian override it.
+* The Jacobian is evaluated with its columns scaled by the variable scaling
+  of the solver, `J·diag(s)`. The C runtime scales inside its Jacobian
+  functions, so scaling afterwards would round differently.
 
 ### Facts about a system in `SystemInfo`
 

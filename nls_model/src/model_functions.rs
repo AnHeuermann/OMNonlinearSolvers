@@ -64,17 +64,23 @@ pub trait ModelFunctions {
     /// Returns an [`EvalError`] if `F` can't be evaluated at `x`.
     fn eval(&mut self, x: &[f64], res: &mut [f64]) -> Result<(), EvalError>;
 
-    /// Evaluate the Jacobian `jacobian := J(x)` with `J = ∂F/∂x`.
+    /// Evaluate the scaled Jacobian `jacobian := J(x)·diag(x_scaling)` with
+    /// `J = ∂F/∂x`.
     ///
     /// `fx` is the residual `F(x)` at the same `x`, the caller has computed it
-    /// already. `jacobian` is a `num_residuals × num_unknowns` view of a
-    /// column-major matrix.
+    /// already. `x_scaling` has one factor per unknown, the solvers pass their
+    /// variable scaling, see [`scaling::variables`](crate::scaling::variables).
+    /// `jacobian` is a `num_residuals × num_unknowns` view of a column-major
+    /// matrix.
     ///
     /// The default computes forward differences, one evaluation of `F` per
     /// column, with the step `h = sqrt(20·ε)·(1 + |xⱼ|)` of the C runtime. When
     /// `x+h` reaches maximum bound backwards differences are used instead.
     ///
-    /// Systems with an analytical Jacobian override it.
+    /// Systems with an analytical Jacobian override it and multiply each
+    /// column `j` by `x_scaling[j]`. The scaling is part of the evaluation,
+    /// so that the entries are rounded like in the C runtime, which scales
+    /// inside its Jacobian functions.
     ///
     /// # Errors
     ///
@@ -82,23 +88,27 @@ pub trait ModelFunctions {
     ///
     /// # Panics
     ///
-    /// Panics if the shape of `jacobian` doesn't match `x` and `fx`.
+    /// Panics if the shape of `jacobian` doesn't match `x` and `fx`, or
+    /// `x_scaling` doesn't have one factor per unknown.
     fn derivative(
         &mut self,
         x: &[f64],
         fx: &[f64],
+        x_scaling: &[f64],
         jacobian: MatMut<'_, f64>,
     ) -> Result<(), EvalError> {
-        forward_differences(self, x, fx, jacobian)
+        forward_differences(self, x, fx, x_scaling, jacobian)
     }
 }
 
-/// The Jacobian `J(x)` of `model` by forward differences, the default of
-/// [`ModelFunctions::derivative`].
+/// The scaled Jacobian `J(x)·diag(x_scaling)` of `model` by forward
+/// differences, the default of [`ModelFunctions::derivative`].
 ///
 /// One evaluation of `F` per column, with the step `h = sqrt(20·ε)·(1 + |xⱼ|)`
 /// of the C runtime, backwards where `x + h` reaches the upper bound. `fx` is
-/// `F(x)`. Models that override `derivative` can fall back to it.
+/// `F(x)`. Models that override `derivative` can fall back to it. Each
+/// difference is multiplied by `1/h·x_scaling[j]`, like in
+/// `getNumericalJacobianHomotopy`.
 ///
 /// # Errors
 ///
@@ -107,15 +117,18 @@ pub trait ModelFunctions {
 ///
 /// # Panics
 ///
-/// Panics if the shape of `jacobian` doesn't match `x` and `fx`.
+/// Panics if the shape of `jacobian` doesn't match `x` and `fx`, or
+/// `x_scaling` doesn't have one factor per unknown.
 pub fn forward_differences<M: ModelFunctions + ?Sized>(
     model: &mut M,
     x: &[f64],
     fx: &[f64],
+    x_scaling: &[f64],
     jacobian: MatMut<'_, f64>,
 ) -> Result<(), EvalError> {
     assert_eq!(x.len(), jacobian.ncols());
     assert_eq!(fx.len(), jacobian.nrows());
+    assert_eq!(x_scaling.len(), x.len(), "Scaling vector has wrong length");
 
     let delta = (f64::EPSILON * 20.0).sqrt();
 
@@ -135,9 +148,10 @@ pub fn forward_differences<M: ModelFunctions + ?Sized>(
         let column: &mut [f64] = col.try_as_col_major_mut().unwrap().as_slice_mut();
         model.eval(&x_tilde, column)?;
 
-        // col := (F(x + h·eⱼ) − F(x)) / h
+        // col := (F(x + h·eⱼ) − F(x)) / h · sⱼ
+        let factor = 1.0 / h * x_scaling[j];
         for i in 0..column.len() {
-            column[i] = (column[i] - fx[i]) / h;
+            column[i] = (column[i] - fx[i]) * factor;
         }
 
         x_tilde[j] = x[j]; // undo the perturbation
@@ -167,7 +181,7 @@ mod numeric_jacobian_tests {
         let mut f_x = vec![0.0; info.num_residuals];
         let mut jac = Mat::zeros(info.num_residuals, info.num_unknowns);
         model.eval(x, &mut f_x)?;
-        model.derivative(x, &f_x, jac.as_mut())?;
+        model.derivative(x, &f_x, &vec![1.0; x.len()], jac.as_mut())?;
         Ok(jac)
     }
 
@@ -223,6 +237,29 @@ mod numeric_jacobian_tests {
             res[0] = x.powi(2) + y.powi(2);
             Ok(())
         }
+    }
+
+    #[test]
+    /// The difference quotient is multiplied by `1/h·sⱼ` like in
+    /// `getNumericalJacobianHomotopy`, for `F(x, y) = x² + y²` at `(0.5, 0.2)`
+    /// with the scaling `(7, 3)`. Dividing by `h` and multiplying by `sⱼ`
+    /// afterwards rounds differently there.
+    fn numeric_jacobian_scaling_test() {
+        let mut model = F {
+            info: SystemInfo::new(1, 2),
+        };
+        let (x, x_scaling) = ([0.5, 0.2], [7.0, 3.0]);
+        let mut fx = [0.0];
+        model.eval(&x, &mut fx).unwrap();
+        let mut jac = Mat::zeros(1, 2);
+
+        model.derivative(&x, &fx, &x_scaling, jac.as_mut()).unwrap();
+
+        let h = (f64::EPSILON * 20.0).sqrt() * (1.0 + x[0]);
+        let mut f_h = [0.0];
+        model.eval(&[x[0] + h, x[1]], &mut f_h).unwrap();
+        assert!(jac[(0, 0)] == (f_h[0] - fx[0]) * (1.0 / h * x_scaling[0]));
+        assert!(jac :approx_eq_fd_tol(): mat![[2.0 * 0.5 * 7.0, 2.0 * 0.2 * 3.0]]);
     }
 
     #[test]

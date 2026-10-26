@@ -184,11 +184,11 @@ fn eval_constrained() {
     // On the boundary the forward difference stays inside the constraint
     model.eval(&[0.0], &mut res).unwrap();
     model
-        .derivative(&[0.0], &res.clone(), jac.as_mut())
+        .derivative(&[0.0], &res.clone(), &[1.0], jac.as_mut())
         .unwrap();
 
     // Outside the constraint the derivative fails as well
-    let result = model.derivative(&[-1.0], &[-3.0], jac.as_mut());
+    let result = model.derivative(&[-1.0], &[-3.0], &[1.0], jac.as_mut());
     assert!(matches!(result, Err(EvalError::ConstraintViolated)));
 }
 

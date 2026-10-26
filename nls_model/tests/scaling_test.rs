@@ -25,14 +25,14 @@
  *
  */
 
-//! Tests of the scaling functions for variables, residuals and the rows and
-//! columns of a linear system, and of the errors measured with them.
+//! Tests of the scaling functions for variables, residuals and the rows of a
+//! linear system, and of the errors measured with them.
 
 use equator::assert;
 use faer::mat;
 use faer::utils::approx::{ApproxEq, CwiseMat};
 use nls_model::scaling::{
-    columns, make_finite, residuals, rows, scaled_squared_error, squared_error, unscale, variables,
+    make_finite, residuals, rows, scaled_squared_error, squared_error, unscale, variables,
 };
 
 /// Equal up to rounding errors, `128·ε` absolute and relative
@@ -95,44 +95,6 @@ fn row_scaling_square_matrix_test() {
     let mut m = mat![[1.0, 2.0], [3.0, 4.0]];
 
     rows(m.as_mut());
-}
-
-#[test]
-/// Each column of `J` in the 3×4 matrix `[J | b]` is multiplied by its
-/// factor, the right-hand side `b` in the last column stays unchanged
-fn column_scaling_test() {
-    let mut m = mat![
-        [0.0, 0.0, 0.0, 10.0],
-        [1.0, 2.0, 4.0, -3.0],
-        [5.0, -6.0, 7.0, -8.0]
-    ];
-    let factor = vec![1.0, -2.0, 0.0];
-
-    columns(m.as_mut(), &factor);
-    assert!(m :approx_eq_eps(): mat![
-        [0.0, -0.0, 0.0, 10.0],
-        [1.0, -4.0, 0.0, -3.0],
-        [5.0, 12.0, 0.0, -8.0]
-    ]);
-}
-
-#[test]
-#[should_panic = "Matrix has wrong shape"]
-/// `columns` needs the right-hand side as last column, passing the square
-/// Jacobian `J` alone is a mistake
-fn column_scaling_square_matrix_test() {
-    let mut m = mat![[1.0, 2.0], [3.0, 4.0]];
-
-    columns(m.as_mut(), &[1.0, 2.0]);
-}
-
-#[test]
-#[should_panic = "Scaling vector has wrong length"]
-/// `factor` has one entry per unknown, not one for the right-hand side too
-fn column_scaling_factor_length_test() {
-    let mut m = mat![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
-
-    columns(m.as_mut(), &[1.0, 2.0, 1.0]);
 }
 
 #[test]

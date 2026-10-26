@@ -200,17 +200,22 @@ impl ModelFunctions for CModel<'_> {
         eval_result(status)
     }
 
+    /// The Jacobian callback's `J(x)`, each column `j` multiplied by
+    /// `x_scaling[j]` like in `getAnalyticalJacobianHomotopy`, or forward
+    /// differences without a callback.
     fn derivative(
         &mut self,
         x: &[f64],
         fx: &[f64],
+        x_scaling: &[f64],
         jacobian: MatMut<'_, f64>,
     ) -> Result<(), EvalError> {
         let Some(callback) = self.model.jacobian else {
-            return forward_differences(self, x, fx, jacobian);
+            return forward_differences(self, x, fx, x_scaling, jacobian);
         };
         assert_eq!(x.len(), self.info.num_unknowns);
         assert_eq!(fx.len(), self.info.num_residuals);
+        assert_eq!(x_scaling.len(), x.len(), "Scaling vector has wrong length");
         assert_eq!(
             (jacobian.nrows(), jacobian.ncols()),
             (fx.len(), x.len()),
@@ -230,10 +235,10 @@ impl ModelFunctions for CModel<'_> {
         eval_result(status)?;
 
         let rows = fx.len();
-        for (j, column) in jacobian.col_iter_mut().enumerate() {
+        for ((j, column), scaling) in jacobian.col_iter_mut().enumerate().zip(x_scaling) {
             let values = &self.jacobian[j * rows..(j + 1) * rows];
             for (entry, value) in column.iter_mut().zip(values) {
-                *entry = *value;
+                *entry = value * scaling;
             }
         }
         Ok(())
