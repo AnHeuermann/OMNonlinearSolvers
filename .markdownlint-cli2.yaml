@@ -1,0 +1,18 @@
+# Configuration of markdownlint-cli2, the Markdown check of CI. The rules are
+# described at https://github.com/DavidAnson/markdownlint
+config:
+  default: true
+  # Lines of prose at most 80 characters, tables and code blocks may be longer
+  MD013:
+    line_length: 80
+    tables: false
+    code_blocks: false
+
+globs:
+  - "**/*.md"
+
+ignores:
+  - "target/**"
+  - "build_c/**"
+  # Claude Code includes AGENTS.md with its only line, `@AGENTS.md`
+  - "CLAUDE.md"

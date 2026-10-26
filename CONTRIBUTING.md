@@ -8,7 +8,8 @@ Install a stable Rust toolchain with [rustup][rustup].
 
 The repository ships a pre-commit hook in [.githooks/](.githooks/) that runs on
 every commit. For staged Rust files it adds a missing license header, updates an
-outdated copyright year and formats the file with `rustfmt`. Enable it once
+outdated copyright year and formats the file with `rustfmt`. Staged Markdown
+files it fixes with `markdownlint-cli2`, if Node.js is installed. Enable it once
 after cloning:
 
 ```sh
@@ -22,6 +23,8 @@ If a staged file also has unstaged changes, the hook only checks it, so that the
 unstaged changes don't end up in the commit. When such a file has no valid
 license header or is not formatted, the commit is aborted. Run
 `.ci/check_license.py --fix` and `cargo fmt`, stage the result and commit again.
+The commit is also aborted for Markdown issues `markdownlint-cli2` can't fix
+itself, like a line that is too long.
 
 ## Build
 
@@ -43,6 +46,14 @@ Clippy warnings. CI fails on any warning, check locally with:
 ```sh
 cargo fmt
 cargo clippy --workspace --all-targets -- -D warnings
+```
+
+The Markdown files are checked with [markdownlint-cli2][markdownlint-cli2],
+configured in [.markdownlint-cli2.yaml](.markdownlint-cli2.yaml): lines of
+prose are at most 80 characters. With Node.js installed, check them with:
+
+```sh
+npx markdownlint-cli2
 ```
 
 ## License Headers
@@ -131,11 +142,13 @@ the README.
 ## Continuous Integration
 
 Every pull request and push to `main` runs [ci.yml](.github/workflows/ci.yml),
-which checks the formatting and license headers, runs Clippy with warnings as
-errors, builds the crate, checks that the C header is up to date, runs the
-tests, runs the C tests, and builds the documentation. The coverage job prints a summary
-on the run's page and uploads the HTML report as the `coverage` artifact.
+which checks the formatting, the license headers and the Markdown files, runs
+Clippy with warnings as errors, builds the crate, checks that the C header is up
+to date, runs the tests, runs the C tests, and builds the documentation. The
+coverage job prints a summary on the run's page and uploads the HTML report as
+the `coverage` artifact.
 
 [cargo-llvm-cov]: https://github.com/taiki-e/cargo-llvm-cov
 [cbindgen]: https://github.com/mozilla/cbindgen
+[markdownlint-cli2]: https://github.com/DavidAnson/markdownlint-cli2
 [rustup]: https://rustup.rs/

@@ -85,8 +85,8 @@ OpenModelica and uses this interface.
 
 ## License
 
-This package is part of the OpenModelica Run-Time System and is distributed, at your choice,
-under the terms of one of the following licenses:
+This package is part of the OpenModelica Run-Time System and is distributed, at
+your choice, under the terms of one of the following licenses:
 
 * [BSD 3-Clause License (BSD New)][bsd-3-clause]
 * [GNU Affero General Public License (AGPL) version 3][agpl-3]

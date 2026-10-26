@@ -31,6 +31,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: python3 .ci/check_license.py
 
+  markdown:
+    name: Markdown
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Uses .markdownlint-cli2.yaml
+      # markdownlint-cli2 0.23.2, the version of .githooks/pre-commit
+      - uses: DavidAnson/markdownlint-cli2-action@4580e1612f6407034edd6c0e4e316d725920867b # v24.2.0
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest

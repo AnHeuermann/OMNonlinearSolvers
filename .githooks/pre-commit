@@ -1,26 +1,30 @@
 #!/bin/sh
-# Add missing license headers to staged Rust files and format them with
-# rustfmt before committing.
+# Before committing, add missing license headers to staged Rust files and
+# format them with rustfmt, and fix staged Markdown files with markdownlint.
 #
 # Enable with: git config core.hooksPath .githooks
 
 set -e
 
-files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.rs')
-[ -z "$files" ] && exit 0
+# The version the Markdown job of CI runs, see .github/workflows/ci.yml
+MARKDOWNLINT=markdownlint-cli2@0.23.2
 
-# Re-staging a file that also has unstaged changes would sneak those changes
-# into the commit, so only check those files instead of fixing them.
-partial=""
-complete=""
-for f in $files; do
-  if git diff --quiet -- "$f"; then
-    complete="$complete $f"
-  else
-    partial="$partial $f"
-  fi
-done
+# Splits the staged files matching $1 into $complete and $partial. Re-staging
+# a file that also has unstaged changes would sneak those changes into the
+# commit, so those files are only checked instead of fixed.
+split_staged() {
+  partial=""
+  complete=""
+  for f in $(git diff --cached --name-only --diff-filter=ACMR -- "$1"); do
+    if git diff --quiet -- "$f"; then
+      complete="$complete $f"
+    else
+      partial="$partial $f"
+    fi
+  done
+}
 
+split_staged '*.rs'
 edition=$(sed -n 's/^edition *= *"\([0-9]*\)".*/\1/p' Cargo.toml)
 
 if [ -n "$partial" ]; then
@@ -42,5 +46,30 @@ fi
 if [ -n "$complete" ]; then
   .ci/check_license.py --fix $complete
   rustfmt --edition "$edition" $complete
+  git add $complete
+fi
+
+split_staged '*.md'
+[ -z "$complete$partial" ] && exit 0
+
+if ! command -v npx >/dev/null 2>&1; then
+  echo "pre-commit: npx not found, Markdown files not checked. CI checks them." >&2
+  exit 0
+fi
+
+# --no-globs: only the staged files, not all files of .markdownlint-cli2.yaml
+if [ -n "$partial" ]; then
+  if ! npx --yes "$MARKDOWNLINT" --no-globs $partial; then
+    echo "pre-commit: fix these partially staged Markdown files, stage them and commit again." >&2
+    exit 1
+  fi
+fi
+
+if [ -n "$complete" ]; then
+  # --fix fails if issues remain that it can't fix, like long lines
+  if ! npx --yes "$MARKDOWNLINT" --no-globs --fix $complete; then
+    echo "pre-commit: fix the remaining Markdown issues, stage the files and commit again." >&2
+    exit 1
+  fi
   git add $complete
 fi

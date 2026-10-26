@@ -1,6 +1,19 @@
 {
   "editor.indentSize": "tabSize",
   "editor.tabSize": 4,
+  // markdownlint reads .markdownlint-cli2.yaml, it fixes what it can on save.
+  // Long lines aren't fixed, the ruler shows the limit of 80 characters.
+  "[markdown]": {
+    "editor.codeActionsOnSave": {
+      "source.fixAll.markdownlint": "explicit"
+    },
+    "editor.rulers": [80]
+  },
+  // rustfmt formats code to its default width of 100 characters, comments
+  // are wrapped at 80
+  "[rust]": {
+    "editor.rulers": [80, 100]
+  },
   // CMake Tools: the C tests of the C interface, see CONTRIBUTING.md
   "cmake.buildDirectory": "${workspaceFolder}/build_c",
   "cmake.configureOnOpen": true,
