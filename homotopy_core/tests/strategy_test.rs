@@ -28,7 +28,9 @@
 //! Tests of the strategy that combines Newton's method and the homotopies.
 
 use homotopy_core::settings::Settings;
-use homotopy_core::{Direction, HomotopyError, HomotopyRun, HomotopySolver, Solved};
+use homotopy_core::{
+    Direction, HomotopyError, HomotopyRun, HomotopySolver, PathError, PathObserver, Solved,
+};
 use newton::settings::Settings as NewtonSettings;
 use nls_model::{ClosureModel, EvalError, ModelFunctions};
 
@@ -199,7 +201,7 @@ fn own_homotopy() -> impl ModelFunctions {
 fn own_homotopy_test() {
     let mut x = [0.0];
 
-    let result = solver(1).solve_own_homotopy(&mut own_homotopy(), &mut x, Direction::Positive);
+    let result = solver(1).solve_own_homotopy(&mut own_homotopy(), Direction::Positive, &mut x);
 
     assert!(matches!(result, Ok(Direction::Positive)), "got {result:?}");
     assert!((x[0] - 2.0).abs() < 1e-5, "{x:?}");
@@ -211,8 +213,78 @@ fn own_homotopy_test() {
 fn own_homotopy_opposite_test() {
     let mut x = [0.0];
 
-    let result = solver(1).solve_own_homotopy(&mut own_homotopy(), &mut x, Direction::Negative);
+    let result = solver(1).solve_own_homotopy(&mut own_homotopy(), Direction::Negative, &mut x);
 
     assert!(matches!(result, Ok(Direction::Positive)), "got {result:?}");
     assert!((x[0] - 2.0).abs() < 1e-5, "{x:?}");
+}
+
+#[test]
+/// Newton's method counts its iterations, a solve without homotopy has no
+/// path steps
+fn statistics_newton_test() {
+    let mut model = ClosureModel::new(1, 1, |x: &[f64], f: &mut [f64]| {
+        f[0] = x[0] * x[0] - 2.0;
+        Ok(())
+    });
+    let mut solver = solver(1);
+    let mut x = [1.0];
+
+    solver.solve(&mut model, &mut x).unwrap();
+
+    let statistics = solver.statistics();
+    assert!(statistics.newton_iterations > 1, "{statistics:?}");
+    assert_eq!(statistics.path_steps, 0);
+}
+
+/// Counts the paths and accepted steps reported to it
+#[derive(Default)]
+struct Counter {
+    paths: Vec<Direction>,
+    accepted: usize,
+    failed: usize,
+    finished_steps: Option<usize>,
+}
+
+impl PathObserver for Counter {
+    fn path_started(&mut self, direction: Direction, _: &[f64]) {
+        self.paths.push(direction);
+    }
+    fn step_accepted(&mut self, _: &[f64]) {
+        self.accepted += 1;
+    }
+    fn path_finished(&mut self, _: &[f64], steps: usize) {
+        self.finished_steps = Some(steps);
+    }
+    fn path_failed(&mut self, _: &PathError) {
+        self.failed += 1;
+    }
+}
+
+#[test]
+/// The cubic reports both Newton homotopy paths, the first fails, and the
+/// path steps of the second are the statistics
+fn observer_test() {
+    let mut model = ClosureModel::new(1, 1, |x: &[f64], f: &mut [f64]| {
+        f[0] = x[0].powi(3) - 2.0 * x[0] + 2.0;
+        Ok(())
+    });
+    let mut solver = solver(1);
+    let mut counter = Counter::default();
+    let mut x = [0.0];
+
+    let result = solver.solve_observed(&mut model, &mut counter, &mut x);
+
+    assert!(matches!(
+        result,
+        Ok(Solved::Homotopy(HomotopyRun::NewtonNegative))
+    ));
+    assert_eq!(counter.paths, [Direction::Positive, Direction::Negative]);
+    assert_eq!(counter.failed, 1);
+    let steps = counter.finished_steps.unwrap();
+    assert_eq!(solver.statistics().path_steps, steps);
+    assert!(
+        counter.accepted >= steps,
+        "the accepted steps of both paths"
+    );
 }

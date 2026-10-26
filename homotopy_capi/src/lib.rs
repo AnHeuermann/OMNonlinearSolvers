@@ -39,14 +39,21 @@
 //! All `unsafe` code of the project belongs in this crate.
 
 mod exports;
+mod logger;
 mod model;
+mod observer;
 mod settings;
 
 pub use exports::{
-    HomSolvedBy, HomSolver, HomStatus, hom_solve, hom_solve_own_homotopy, hom_solver_free,
-    hom_solver_new,
+    HomSolvedBy, HomSolver, HomStatistics, HomStatus, hom_solve, hom_solve_own_homotopy,
+    hom_solver_free, hom_solver_new, hom_solver_statistics,
 };
+pub use logger::{HomLogLevel, HomLogger, hom_set_logger};
 pub use model::{
     HOM_EVAL_ASSERT, HOM_EVAL_CONSTRAINT_VIOLATED, HOM_EVAL_OK, HomJacobian, HomModel, HomResidual,
+};
+pub use observer::{
+    HomObserver, HomPathFailed, HomPathFailure, HomPathFinished, HomPathStarted, HomStepAccepted,
+    HomStepStarted,
 };
 pub use settings::HomSettings;

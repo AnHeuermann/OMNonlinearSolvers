@@ -36,8 +36,9 @@ const MIN_TANGENT_LAMBDA: f64 = 1e-8;
 /// Why the predictor found no point.
 #[derive(Debug)]
 pub(crate) enum PredictorError {
-    /// The homotopy asserted for every step size down to `tau_min`
-    BackedOffBelowTauMin,
+    /// The homotopy asserted for every step size down to `tau_min`, `tau` is
+    /// the last step size divided once more, as the C runtime reports it
+    BackedOffBelowTauMin { tau: f64 },
     /// The homotopy violated a constraint, which doesn't back off
     ModelError(EvalError),
 }
@@ -101,7 +102,7 @@ pub(crate) fn predictor(
             }
         }
         if tau <= settings.tau_min {
-            return Err(PredictorError::BackedOffBelowTauMin);
+            return Err(PredictorError::BackedOffBelowTauMin { tau });
         }
     }
 }
@@ -180,7 +181,7 @@ mod predictor_tests {
         let (result, calls, _, _) = predict(|_| Some(EvalError::Assert));
 
         assert!(
-            matches!(result, Err(PredictorError::BackedOffBelowTauMin)),
+            matches!(result, Err(PredictorError::BackedOffBelowTauMin { tau }) if tau < 1e-4),
             "got {result:?}"
         );
         assert_eq!(calls, 11);

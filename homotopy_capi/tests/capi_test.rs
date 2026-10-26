@@ -28,7 +28,7 @@
 //! Tests of the C interface, with callbacks as a C host would pass them.
 
 use homotopy_capi::*;
-use std::ffi::{c_int, c_void};
+use std::ffi::{CStr, c_char, c_int, c_void};
 use std::ptr::{null, null_mut};
 
 /// `F(x) = x³ − 2x + 2`, which needs a homotopy from 0
@@ -96,6 +96,7 @@ fn model(size: usize, residual: HomResidual) -> HomModel {
         casual_tearing_set: false,
         residual,
         jacobian: None,
+        observer: null(),
     }
 }
 
@@ -415,4 +416,132 @@ fn header_compiles_test() {
         ),
         Err(_) => eprintln!("No C compiler `{compiler}`, header not checked"),
     }
+}
+
+/// The events of the paths of a solve
+#[derive(Default)]
+struct Events {
+    started: Vec<c_int>,
+    steps_started: usize,
+    steps_accepted: usize,
+    finished_steps: Option<usize>,
+    failures: Vec<(HomPathFailure, f64)>,
+}
+
+unsafe extern "C" fn path_started(user: *mut c_void, direction: c_int, y: *const f64, size: usize) {
+    let events = unsafe { &mut *(user as *mut Events) };
+    assert_eq!(unsafe { *y.add(size - 1) }, 0.0, "starts at λ = 0");
+    events.started.push(direction);
+}
+
+unsafe extern "C" fn step_started(user: *mut c_void, _: *const f64, _: usize) {
+    unsafe { (*(user as *mut Events)).steps_started += 1 };
+}
+
+unsafe extern "C" fn step_accepted(user: *mut c_void, _: *const f64, _: usize) {
+    unsafe { (*(user as *mut Events)).steps_accepted += 1 };
+}
+
+unsafe extern "C" fn path_finished(user: *mut c_void, y: *const f64, size: usize, steps: usize) {
+    let events = unsafe { &mut *(user as *mut Events) };
+    assert_eq!(unsafe { *y.add(size - 1) }, 1.0, "ends at λ = 1");
+    events.finished_steps = Some(steps);
+}
+
+unsafe extern "C" fn path_failed(user: *mut c_void, failure: HomPathFailure, value: f64) {
+    unsafe { (*(user as *mut Events)).failures.push((failure, value)) };
+}
+
+#[test]
+/// The cubic reports both Newton homotopy paths: the first falls below
+/// `λ = −1`, the second reaches `λ = 1`. The statistics count its steps.
+fn observer_test() {
+    let mut events = Events::default();
+    let observer = HomObserver {
+        user: (&raw mut events).cast(),
+        path_started: Some(path_started),
+        step_started: Some(step_started),
+        step_accepted: Some(step_accepted),
+        path_finished: Some(path_finished),
+        path_failed: Some(path_failed),
+    };
+    let model = HomModel {
+        observer: &observer,
+        ..model(1, Some(cubic))
+    };
+    let mut x = [0.0];
+
+    let statistics = unsafe {
+        let solver = hom_solver_new(1, null());
+        assert_eq!(
+            hom_solve(solver, &model, x.as_mut_ptr(), null_mut()),
+            HomStatus::Solved
+        );
+        let statistics = hom_solver_statistics(solver);
+        hom_solver_free(solver);
+        statistics
+    };
+
+    assert_eq!(events.started, [1, -1]);
+    assert_eq!(events.failures.len(), 1);
+    let (failure, lambda) = events.failures[0];
+    assert_eq!(failure, HomPathFailure::LambdaBelowMinusOne);
+    assert!(lambda < -1.0, "{lambda}");
+    let steps = events.finished_steps.unwrap();
+    assert!(events.steps_accepted >= steps && events.steps_started >= events.steps_accepted);
+    assert_eq!(statistics.path_steps, steps);
+    assert!(
+        statistics.newton_iterations > 0,
+        "the Newton runs before and after the paths"
+    );
+}
+
+#[test]
+/// A solver without a solve has empty statistics, `NULL` too
+fn statistics_test() {
+    unsafe {
+        let solver = hom_solver_new(1, null());
+        assert_eq!(hom_solver_statistics(solver), HomStatistics::default());
+        hom_solver_free(solver);
+        assert_eq!(hom_solver_statistics(null()), HomStatistics::default());
+    }
+}
+
+/// The messages the logger received
+static MESSAGES: std::sync::Mutex<Vec<(HomLogLevel, String, String)>> =
+    std::sync::Mutex::new(Vec::new());
+
+unsafe extern "C" fn logger(level: HomLogLevel, target: *const c_char, message: *const c_char) {
+    let text = |pointer| {
+        unsafe { CStr::from_ptr(pointer) }
+            .to_string_lossy()
+            .into_owned()
+    };
+    MESSAGES
+        .lock()
+        .unwrap()
+        .push((level, text(target), text(message)));
+}
+
+#[test]
+/// The messages of Newton's method reach the logger with their target, and
+/// none once the logger is removed
+fn logger_test() {
+    let mut x = [1.0];
+    unsafe { hom_set_logger(Some(logger), 5) };
+    let (status, _) = solve(&model(1, Some(cubic)), &mut x);
+    unsafe { hom_set_logger(None, 0) };
+
+    assert_eq!(status, HomStatus::Solved);
+    let messages = std::mem::take(&mut *MESSAGES.lock().unwrap());
+    assert!(
+        messages.iter().any(|(level, target, message)| *level == 5
+            && target == "NLS"
+            && message.starts_with("Newton iteration")),
+        "{messages:?}"
+    );
+
+    let (status, _) = solve(&model(1, Some(cubic)), &mut x);
+    assert_eq!(status, HomStatus::Solved);
+    assert!(MESSAGES.lock().unwrap().is_empty());
 }

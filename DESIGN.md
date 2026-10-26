@@ -176,9 +176,19 @@ itself.
 
 The libraries write messages with the [`log`][log] crate and don't choose a
 logger. The target is the name of the C runtime's stream without the
-`OMC_LOG_` prefix, for example `NLS_V` for the Newton iteration, so
-`homotopy_capi` can forward them to the `OMC_LOG_*` streams. The Newton
-iteration logs each step with `trace!` and its result with `debug!`.
+`OMC_LOG_` prefix and the `_V` suffix, for example `NLS` for Newton's method
+and `NLS_HOMOTOPY` for the homotopy. A message of a verbose stream is a
+`trace!`, unless it is a clear error. `hom_set_logger` of `homotopy_capi`
+forwards the messages to a C host, which maps them to its streams.
+
+### Events for what a host logs word for word
+
+Messages a host compares or parses, like the `λ` of each homotopy step that
+the OpenModelica testsuite checks, aren't formatted by the solver. The path
+following reports events to a `PathObserver`, `HomObserver` in C, and the
+host formats them itself. So the OpenModelica glue prints them with the
+`printf` formats of the C runtime, which Rust's formatting can't reproduce
+exactly.
 
 ## Tests
 

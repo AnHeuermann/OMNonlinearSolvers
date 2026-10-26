@@ -42,13 +42,11 @@
   `HomotopySolver::solve`. C solves the first linear system there and reuses
   it as the first Newton step, `newton::solve` evaluates the Jacobian again.
   This needs a `newton::solve` that starts from a prepared linear system.
-* Implement OpenModelica-like logging. The target is the C stream without the
-  `OMC_LOG_` prefix and the `_V` suffix, and a verbose stream becomes `trace!`
-  unless the message is a clear error. So
-  `warningStreamPrint(OMC_LOG_NLS_V, ...)` usually becomes
-  `trace!(target: "NLS", ...)`. Update the log calls in `newton` and
-  `nls_model::scaling` (target `NLS_V` so far) and the `log` entry in
-  DESIGN.md.
+* Remove the CSV export of the homotopy path later on. The OpenModelica glue
+  writes it with `LOG_INIT_HOMOTOPY` like the C runtime did
+  (`<model>_nonlinsys<n>_adaptive_<global|local>_homotopy_<pos|neg>.csv`), but
+  it looks like a debugging feature that isn't used any more. It is kept for
+  now to stay comparable with the C runtime.
 
 [newton_rootfinder]: https://github.com/Nateckert/newton_rootfinder
 [nrfind]: https://github.com/NoraCodes/nrfind

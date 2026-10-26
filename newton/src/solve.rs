@@ -31,7 +31,7 @@ use crate::line_search::{LineSearchError, Start, line_search};
 use crate::settings::Settings;
 use crate::tracker::{Decision, Step, Tracker};
 use faer::{ColRef, Mat};
-use log::{debug, trace};
+use log::trace;
 use nls_model::scaling::{self, scaled_squared_error, squared_error};
 use nls_model::{EvalError, ModelFunctions};
 use total_pivot_solver::{SolveError, SolveStatus};
@@ -59,6 +59,9 @@ pub struct NewtonWorkspace {
     /// Residual scaling, one factor per residual, see
     /// [`nls_model::scaling::residuals`]
     res_scaling: Box<[f64]>,
+
+    /// Iterations of the latest [`solve`]
+    iterations: usize,
 }
 
 impl NewtonWorkspace {
@@ -73,12 +76,18 @@ impl NewtonWorkspace {
 
             x_scaling: vec![0.0; num_unknowns].into_boxed_slice(),
             res_scaling: vec![0.0; num_residuals].into_boxed_slice(),
+            iterations: 0,
         }
     }
 
     /// The residual scaling of the latest Jacobian of [`solve`].
     pub fn res_scaling(&self) -> &[f64] {
         &self.res_scaling
+    }
+
+    /// The number of iterations of the latest [`solve`], also when it failed.
+    pub fn iterations(&self) -> usize {
+        self.iterations
     }
 }
 
@@ -176,14 +185,16 @@ pub fn solve<M: ModelFunctions>(
     assert_eq!(work.x1.len(), n, "Workspace has wrong size");
 
     scaling::variables(&model.info().nominal, x, &mut work.x_scaling);
+    work.iterations = 0;
     evaluate_start(model, x, work)?;
 
     let mut err = squared_error(&work.f);
     let mut err_scaled = scaled_squared_error(&work.f, &work.res_scaling);
     let mut tracker = Tracker::new(settings, err, err_scaled);
-    debug!(target: "NLS_V", "Newton iteration started, error {err:e}, scaled {err_scaled:e}");
+    trace!(target: "NLS", "Newton iteration started, error {err:e}, scaled {err_scaled:e}");
 
     for iteration in 1.. {
+        work.iterations = iteration;
         let solution = total_pivot_solver::solve(&mut work.jacobian, Some(n), casual_tearing_set)?;
         // The C runtime ignores a vanishing determinant of the first linear
         // system, which `solveHomotopy` solves before the iteration starts
@@ -219,7 +230,7 @@ pub fn solve<M: ModelFunctions>(
         };
         tracker.update(step);
         trace!(
-            target: "NLS_V",
+            target: "NLS",
             "Newton iteration {iteration}: error {err:e}, scaled {err_scaled:e}, ‖dy‖² {:e}, λ {step_factor}",
             step.dy
         );
@@ -230,11 +241,11 @@ pub fn solve<M: ModelFunctions>(
                 if take_step {
                     x.copy_from_slice(&work.x1);
                 }
-                debug!(target: "NLS_V", "Newton iteration {iteration}: {status:?}");
+                trace!(target: "NLS", "Newton iteration {iteration}: {status:?}");
                 return Ok(status);
             }
             Decision::Failed(error) => {
-                debug!(target: "NLS_V", "Newton iteration {iteration}: {error:?}");
+                trace!(target: "NLS", "Newton iteration {iteration}: {error:?}");
                 return Err(error);
             }
         }

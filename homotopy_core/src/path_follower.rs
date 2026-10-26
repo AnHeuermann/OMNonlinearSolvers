@@ -71,16 +71,19 @@ pub enum PathError {
     ModelError(EvalError),
     /// The linear system of the tangent has no solution
     Singular,
-    /// The homotopy asserts at every predictor point down to `tau_min`
-    PredictorBackedOff,
+    /// The homotopy asserts at every predictor point down to `tau_min`, `tau`
+    /// is the last step size divided once more
+    PredictorBackedOff { tau: f64 },
     /// The corrector neither reached the path nor moved
     CorrectorStuck,
-    /// A step was tried `max_tries` times
-    TooManyTries,
-    /// The path went below `λ = −1`
-    LambdaBelowMinusOne,
-    /// The path didn't reach `λ = 1` within `max_lambda_steps` steps
-    TooManySteps,
+    /// A step failed with the step size already at `tau_min`
+    TauAtMinimum,
+    /// A step was tried `tries` times, the maximum
+    TooManyTries { tries: usize },
+    /// The path went below `λ = −1`, to `lambda`
+    LambdaBelowMinusOne { lambda: f64 },
+    /// The path didn't reach `λ = 1` within the maximum of `steps` steps
+    TooManySteps { steps: usize },
 }
 
 impl From<EvalError> for PathError {
@@ -101,7 +104,7 @@ impl From<TangentError> for PathError {
 impl From<PredictorError> for PathError {
     fn from(error: PredictorError) -> Self {
         match error {
-            PredictorError::BackedOffBelowTauMin => PathError::PredictorBackedOff,
+            PredictorError::BackedOffBelowTauMin { tau } => PathError::PredictorBackedOff { tau },
             PredictorError::ModelError(error) => PathError::ModelError(error),
         }
     }
@@ -111,10 +114,39 @@ impl From<StepFailure> for PathError {
     fn from(failure: StepFailure) -> Self {
         match failure {
             StepFailure::CorrectorStuck => PathError::CorrectorStuck,
-            StepFailure::TooManyTries => PathError::TooManyTries,
+            StepFailure::TauAtMinimum => PathError::TauAtMinimum,
+            StepFailure::TooManyTries { tries } => PathError::TooManyTries { tries },
         }
     }
 }
+
+/// Events of the path following, for the logging and the statistics of a
+/// host.
+///
+/// The points `y = (x, λ)` have `λ` last. All methods do nothing by default.
+pub trait PathObserver {
+    /// A path starts from `y = (x, 0)` in `direction`.
+    fn path_started(&mut self, _direction: Direction, _y: &[f64]) {}
+
+    /// A try of the next step starts from the latest point `y` of the path.
+    /// Like the C runtime logs `λ`, this is also called before a try fails the
+    /// path, and again for every retry.
+    fn step_started(&mut self, _y: &[f64]) {}
+
+    /// A step was accepted, `y` is the new point of the path.
+    fn step_accepted(&mut self, _y: &[f64]) {}
+
+    /// The path reached `λ = 1` at `y` after `steps` accepted steps.
+    fn path_finished(&mut self, _y: &[f64], _steps: usize) {}
+
+    /// The path failed with `error`.
+    fn path_failed(&mut self, _error: &PathError) {}
+}
+
+/// A [`PathObserver`] that ignores all events
+pub struct NoObserver;
+
+impl PathObserver for NoObserver {}
 
 /// Follow the path of `homotopy` from `(x, 0)` to `λ = 1`.
 ///
@@ -128,7 +160,8 @@ impl From<StepFailure> for PathError {
 /// step or retry it with a smaller step size. Once a predictor reaches
 /// `λ = 1` exactly, the corrector keeps `λ` fixed and uses the residual
 /// tolerance `f_tol` of Newton's method, for the rest of the path like the C
-/// runtime. Returns the number of accepted steps. From `homotopyAlgorithm`.
+/// runtime. `observer` gets the events of the path. Returns the number of
+/// accepted steps. From `homotopyAlgorithm`.
 ///
 /// # Errors
 ///
@@ -143,6 +176,24 @@ pub fn follow_path(
     direction: Direction,
     f_tol: f64,
     settings: &Settings,
+    observer: &mut impl PathObserver,
+    x: &mut [f64],
+) -> Result<usize, PathError> {
+    let result = follow(homotopy, x_scaling, direction, f_tol, settings, observer, x);
+    if let Err(error) = &result {
+        observer.path_failed(error);
+    }
+    result
+}
+
+/// [`follow_path`] without the report of its failure
+fn follow(
+    homotopy: &mut impl ModelFunctions,
+    x_scaling: &[f64],
+    direction: Direction,
+    f_tol: f64,
+    settings: &Settings,
+    observer: &mut impl PathObserver,
     x: &mut [f64],
 ) -> Result<usize, PathError> {
     let n = homotopy.info().num_residuals;
@@ -161,6 +212,7 @@ pub fn follow_path(
     let mut jacobian = Mat::zeros(n, m);
     let mut work = CorrectorWorkspace::new(x_scaling);
 
+    observer.path_started(direction, &y0);
     homotopy.eval(&y0, &mut h)?;
     let mut tau = settings.tau_start;
     let mut tries = 0;
@@ -169,11 +221,14 @@ pub fn follow_path(
     let mut h_eps = settings.h_eps;
 
     while y0[n] < 1.0 {
+        observer.step_started(&y0);
         if y0[n] < -1.0 {
-            return Err(PathError::LambdaBelowMinusOne);
+            return Err(PathError::LambdaBelowMinusOne { lambda: y0[n] });
         }
         if steps >= settings.max_lambda_steps {
-            return Err(PathError::TooManySteps);
+            return Err(PathError::TooManySteps {
+                steps: settings.max_lambda_steps,
+            });
         }
 
         if tries == 0 {
@@ -219,6 +274,7 @@ pub fn follow_path(
                 steps += 1;
                 y0.copy_from_slice(&y1);
                 previous.copy_from_slice(&t);
+                observer.step_accepted(&y0);
             }
             Control::Retry {
                 tau: next_tau,
@@ -231,6 +287,7 @@ pub fn follow_path(
         }
     }
 
+    observer.path_finished(&y0, steps);
     x.copy_from_slice(&y0[..n]);
     Ok(steps)
 }
@@ -241,12 +298,14 @@ mod path_follower_tests {
     use crate::NewtonHomotopy;
     use nls_model::ClosureModel;
 
-    /// Follow the Newton homotopy of the one-dimensional `f` from `x0`
-    fn follow(
+    /// Follow the Newton homotopy of the one-dimensional `f` from `x0`,
+    /// reporting to `observer`
+    fn follow_observed(
         f: impl FnMut(&[f64], &mut [f64]) -> Result<(), EvalError>,
         x0: f64,
         direction: Direction,
         settings: &Settings,
+        observer: &mut impl PathObserver,
     ) -> (Result<usize, PathError>, f64) {
         let mut model = ClosureModel::new(1, 1, f);
         let mut fx0 = [0.0];
@@ -261,15 +320,26 @@ mod path_follower_tests {
             direction,
             1e-12,
             settings,
+            observer,
             &mut x,
         );
         (result, x[0])
     }
 
+    /// Follow the Newton homotopy of the one-dimensional `f` from `x0`
+    fn follow_newton_homotopy(
+        f: impl FnMut(&[f64], &mut [f64]) -> Result<(), EvalError>,
+        x0: f64,
+        direction: Direction,
+        settings: &Settings,
+    ) -> (Result<usize, PathError>, f64) {
+        follow_observed(f, x0, direction, settings, &mut NoObserver)
+    }
+
     #[test]
     /// The Newton homotopy of `x − 2` from 0 is the line `x = 2λ`
     fn linear_test() {
-        let (result, x) = follow(
+        let (result, x) = follow_newton_homotopy(
             |x, f| {
                 f[0] = x[0] - 2.0;
                 Ok(())
@@ -287,7 +357,7 @@ mod path_follower_tests {
     /// Newton's method diverges for `arctan(x) = 0` from `x = 2`, the path of
     /// the Newton homotopy leads to the root 0
     fn arctan_test() {
-        let (result, x) = follow(
+        let (result, x) = follow_newton_homotopy(
             |x, f| {
                 f[0] = x[0].atan();
                 Ok(())
@@ -312,7 +382,8 @@ mod path_follower_tests {
     /// In the negative direction the path goes down to `λ = −2/3` at `x = 1`,
     /// turns and reaches the root at `λ = 1`
     fn turning_point_test() {
-        let (result, x) = follow(cubic, 0.0, Direction::Negative, &Settings::new(1));
+        let (result, x) =
+            follow_newton_homotopy(cubic, 0.0, Direction::Negative, &Settings::new(1));
 
         assert!(result.is_ok(), "got {result:?}");
         assert!((x - 2.103_803_402_735_535).abs() < 1e-5, "{x}");
@@ -322,10 +393,11 @@ mod path_follower_tests {
     /// In the positive direction the path turns at `λ = 2/3` and falls below
     /// `λ = −1`
     fn lambda_below_minus_one_test() {
-        let (result, _) = follow(cubic, 0.0, Direction::Positive, &Settings::new(1));
+        let (result, _) =
+            follow_newton_homotopy(cubic, 0.0, Direction::Positive, &Settings::new(1));
 
         assert!(
-            matches!(result, Err(PathError::LambdaBelowMinusOne)),
+            matches!(result, Err(PathError::LambdaBelowMinusOne { lambda }) if lambda < -1.0),
             "got {result:?}"
         );
     }
@@ -334,7 +406,7 @@ mod path_follower_tests {
     /// A path needs more than one step to reach `λ = 1`
     fn too_many_steps_test() {
         let settings = Settings::new(1).with_max_lambda_steps(1);
-        let (result, x) = follow(
+        let (result, x) = follow_newton_homotopy(
             |x, f| {
                 f[0] = x[0].atan();
                 Ok(())
@@ -345,7 +417,7 @@ mod path_follower_tests {
         );
 
         assert!(
-            matches!(result, Err(PathError::TooManySteps)),
+            matches!(result, Err(PathError::TooManySteps { steps: 1 })),
             "got {result:?}"
         );
         assert_eq!(x, 2.0, "x is unchanged");
@@ -370,12 +442,88 @@ mod path_follower_tests {
             Direction::Positive,
             1e-12,
             &Settings::new(1),
+            &mut NoObserver,
             &mut x,
         );
 
         assert!(
             matches!(result, Err(PathError::ModelError(EvalError::Assert))),
             "got {result:?}"
+        );
+    }
+
+    /// The events of a path, `λ` of their points
+    #[derive(Debug, Default, PartialEq)]
+    struct Recorder {
+        started: Vec<(Direction, f64)>,
+        steps_started: Vec<f64>,
+        steps_accepted: Vec<f64>,
+        finished: Option<(f64, usize)>,
+        failed: bool,
+    }
+
+    impl PathObserver for Recorder {
+        fn path_started(&mut self, direction: Direction, y: &[f64]) {
+            self.started.push((direction, y[y.len() - 1]));
+        }
+        fn step_started(&mut self, y: &[f64]) {
+            self.steps_started.push(y[y.len() - 1]);
+        }
+        fn step_accepted(&mut self, y: &[f64]) {
+            self.steps_accepted.push(y[y.len() - 1]);
+        }
+        fn path_finished(&mut self, y: &[f64], steps: usize) {
+            self.finished = Some((y[y.len() - 1], steps));
+        }
+        fn path_failed(&mut self, _: &PathError) {
+            self.failed = true;
+        }
+    }
+
+    #[test]
+    /// A path reports its start, the start of every try from the latest point,
+    /// every accepted step and its end at `λ = 1`
+    fn observer_test() {
+        let mut recorder = Recorder::default();
+        let (result, _) = follow_observed(
+            cubic,
+            0.0,
+            Direction::Negative,
+            &Settings::new(1),
+            &mut recorder,
+        );
+
+        let steps = result.unwrap();
+        assert_eq!(recorder.started, [(Direction::Negative, 0.0)]);
+        assert_eq!(recorder.steps_accepted.len(), steps);
+        assert_eq!(recorder.finished, Some((1.0, steps)));
+        assert!(!recorder.failed);
+        // Each try starts from the latest accepted point, the first from λ = 0
+        assert_eq!(recorder.steps_started[0], 0.0);
+        assert!(recorder.steps_started.len() >= steps);
+        for lambda in &recorder.steps_started {
+            assert!(*lambda == 0.0 || recorder.steps_accepted.contains(lambda));
+        }
+    }
+
+    #[test]
+    /// A failed path reports the failure, and no end
+    fn observer_failure_test() {
+        let mut recorder = Recorder::default();
+        let (result, _) = follow_observed(
+            cubic,
+            0.0,
+            Direction::Positive,
+            &Settings::new(1),
+            &mut recorder,
+        );
+
+        assert!(result.is_err());
+        assert!(recorder.failed);
+        assert_eq!(recorder.finished, None);
+        assert!(
+            *recorder.steps_started.last().unwrap() < -1.0,
+            "the try below λ = −1 is reported"
         );
     }
 }

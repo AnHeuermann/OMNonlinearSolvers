@@ -27,6 +27,7 @@
 
 //! A system described by C callbacks, as a model of the solvers.
 
+use crate::observer::HomObserver;
 use faer::MatMut;
 use nls_model::{EvalError, ModelFunctions, SystemInfo, forward_differences};
 use std::ffi::{c_int, c_void};
@@ -86,6 +87,8 @@ pub struct HomModel {
     pub residual: HomResidual,
     /// Evaluates `J(x)`, or `NULL` for forward differences
     pub jacobian: HomJacobian,
+    /// Gets the events of the homotopy paths, or `NULL`
+    pub observer: *const HomObserver,
 }
 
 /// A [`HomModel`] as a model of the solvers.

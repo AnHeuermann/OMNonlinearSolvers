@@ -34,7 +34,7 @@
 
 use faer::reborrow::{Reborrow, ReborrowMut};
 use faer::{MatMut, MatRef};
-use log::warn;
+use log::trace;
 
 /// Compute the variable scaling `factor[i] = max(nominal[i], |x[i]|)`.
 ///
@@ -145,7 +145,7 @@ pub fn make_finite(x: &mut [f64]) {
         }
     }
     if changed {
-        warn!(target: "NLS_V", "Entry of the residual scaling is inf or NaN, set to 1.0");
+        trace!(target: "NLS", "Entry of the residual scaling is inf or NaN, set to 1.0");
     }
 }
 

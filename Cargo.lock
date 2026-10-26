@@ -655,6 +655,7 @@ dependencies = [
  "cbindgen",
  "faer",
  "homotopy_core",
+ "log",
  "newton",
  "nls_model",
 ]

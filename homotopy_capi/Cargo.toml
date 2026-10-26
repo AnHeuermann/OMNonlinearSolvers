@@ -12,6 +12,7 @@ crate-type = ["staticlib", "rlib"]
 [dependencies]
 faer.workspace = true
 homotopy_core = { path = "../homotopy_core" }
+log.workspace = true
 newton = { path = "../newton" }
 nls_model = { path = "../nls_model" }
 

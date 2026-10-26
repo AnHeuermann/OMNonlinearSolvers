@@ -31,6 +31,28 @@ typedef enum HomStatus {
   HOM_STATUS_PANIC,
 } HomStatus;
 
+// Why a homotopy path failed, the argument of [`HomPathFailed`].
+typedef enum HomPathFailure {
+  // The homotopy or its Jacobian can't be evaluated
+  HOM_PATH_FAILURE_MODEL_ERROR,
+  // The linear system of the tangent is singular
+  HOM_PATH_FAILURE_SINGULAR,
+  // The homotopy asserts at every predictor point down to the smallest step
+  // size, the value is the last step size divided once more
+  HOM_PATH_FAILURE_PREDICTOR_BACKED_OFF,
+  // The corrector neither reached the path nor moved
+  HOM_PATH_FAILURE_CORRECTOR_STUCK,
+  // A step failed with the step size already at its minimum
+  HOM_PATH_FAILURE_TAU_AT_MINIMUM,
+  // A step was tried the maximum number of times, the value
+  HOM_PATH_FAILURE_TOO_MANY_TRIES,
+  // The path went below `λ = −1`, the value is `λ`
+  HOM_PATH_FAILURE_LAMBDA_BELOW_MINUS_ONE,
+  // The path didn't reach `λ = 1` within the maximum number of steps, the
+  // value
+  HOM_PATH_FAILURE_TOO_MANY_STEPS,
+} HomPathFailure;
+
 // How a solve found the solution.
 typedef enum HomSolvedBy {
   // The start point already solves the system
@@ -107,6 +129,41 @@ typedef int (*HomResidual)(void *user, const double *x, double *f);
 // a value like [`HomResidual`] and must return like it.
 typedef int (*HomJacobian)(void *user, const double *x, const double *f, double *jacobian);
 
+// A path starts from the point `y = (x, 0)` of `size` values towards
+// increasing `λ` for `direction` 1, decreasing for -1.
+typedef void (*HomPathStarted)(void *user, int direction, const double *y, size_t size);
+
+// A try of a step starts from the latest point `y = (x, λ)` of the path, also
+// before a try fails the path and again for every retry.
+typedef void (*HomStepStarted)(void *user, const double *y, size_t size);
+
+// A step was accepted, `y = (x, λ)` is the new point of the path.
+typedef void (*HomStepAccepted)(void *user, const double *y, size_t size);
+
+// The path reached `λ = 1` at `y` after `steps` accepted steps.
+typedef void (*HomPathFinished)(void *user, const double *y, size_t size, size_t steps);
+
+// The path failed for `failure`, `value` is explained there or 0.
+typedef void (*HomPathFailed)(void *user, enum HomPathFailure failure, double value);
+
+// Callbacks for the events of the homotopy paths of a solve, for example
+// for logging. Every callback may be `NULL`, `λ` is the last of the `size`
+// values of a point. Like the other callbacks, they must return.
+typedef struct HomObserver {
+  // Passed to the callbacks as it is
+  void *user;
+  // See [`HomPathStarted`]
+  HomPathStarted path_started;
+  // See [`HomStepStarted`]
+  HomStepStarted step_started;
+  // See [`HomStepAccepted`]
+  HomStepAccepted step_accepted;
+  // See [`HomPathFinished`]
+  HomPathFinished path_finished;
+  // See [`HomPathFailed`]
+  HomPathFailed path_failed;
+} HomObserver;
+
 // A nonlinear system `F(x) = 0` of a C host.
 typedef struct HomModel {
   // Passed to the callbacks as it is
@@ -130,7 +187,27 @@ typedef struct HomModel {
   HomResidual residual;
   // Evaluates `J(x)`, or `NULL` for forward differences
   HomJacobian jacobian;
+  // Gets the events of the homotopy paths, or `NULL`
+  const struct HomObserver *observer;
 } HomModel;
+
+// Statistics of the latest solve of a [`HomSolver`].
+typedef struct HomStatistics {
+  // Iterations of all runs of Newton's method, also the failed ones
+  size_t newton_iterations;
+  // Accepted steps of the homotopy path that led to the solution, 0 without
+  // a homotopy
+  size_t path_steps;
+} HomStatistics;
+
+// Messages with this level or a more severe one go to the logger: 1 error,
+// 2 warning, 3 info, 4 debug and 5 trace.
+typedef int HomLogLevel;
+
+// Receive a `message` of the solver with its `level` (see [`HomLogLevel`]),
+// and its `target`, for example `NLS` for Newton's method or `NLS_HOMOTOPY`
+// for the homotopy. Both strings are only valid during the call.
+typedef void (*HomLogger)(HomLogLevel level, const char *target, const char *message);
 
 // Create a solver for systems with `size` residuals and unknowns.
 //
@@ -161,8 +238,9 @@ void hom_solver_free(struct HomSolver *solver);
 // # Safety
 //
 // `solver` must come from [`hom_solver_new`], `model` must point to a valid
-// [`HomModel`] and `x` to `size` values. The callbacks of `model` are called
-// from this thread only, while the function runs.
+// [`HomModel`], with a valid or `NULL` observer, and `x` to `size` values. The
+// callbacks of `model` and its observer are called from this thread only,
+// while the function runs.
 enum HomStatus hom_solve(struct HomSolver *solver,
                          const struct HomModel *model,
                          double *x,
@@ -185,5 +263,25 @@ enum HomStatus hom_solve_own_homotopy(struct HomSolver *solver,
                                       double *x,
                                       bool negative_start,
                                       enum HomSolvedBy *solved_by);
+
+// The statistics of the latest solve of `solver`, zeros for `NULL`.
+//
+// # Safety
+//
+// `solver` must be `NULL` or come from [`hom_solver_new`].
+struct HomStatistics hom_solver_statistics(const struct HomSolver *solver);
+
+// Send the messages of the solver with at most `max_level` (see
+// [`HomLogLevel`]) to `logger`, for all solvers of the process. `NULL` or a
+// level of 0 switches the messages off. Replaces an earlier logger.
+//
+// The solver uses the Rust `log` crate. If the process already has another
+// Rust logger, the messages go there instead.
+//
+// # Safety
+//
+// `logger` must be `NULL` or a function that can be called from any thread
+// that solves.
+void hom_set_logger(HomLogger logger, HomLogLevel max_level);
 
 #endif  /* HOMOTOPY_CAPI_H */

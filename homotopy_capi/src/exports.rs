@@ -31,6 +31,7 @@
 //! pointer nor a panic reaches the host as undefined behaviour.
 
 use crate::model::{CModel, HomModel};
+use crate::observer::CObserver;
 use crate::settings::HomSettings;
 use homotopy_core::{Direction, HomotopyError, HomotopyRun, HomotopySolver, Solved};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -40,6 +41,17 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 pub struct HomSolver {
     solver: HomotopySolver,
     size: usize,
+}
+
+/// Statistics of the latest solve of a [`HomSolver`].
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct HomStatistics {
+    /// Iterations of all runs of Newton's method, also the failed ones
+    pub newton_iterations: usize,
+    /// Accepted steps of the homotopy path that led to the solution, 0 without
+    /// a homotopy
+    pub path_steps: usize,
 }
 
 /// Whether and how a solve ended.
@@ -157,8 +169,9 @@ pub unsafe extern "C" fn hom_solver_free(solver: *mut HomSolver) {
 /// # Safety
 ///
 /// `solver` must come from [`hom_solver_new`], `model` must point to a valid
-/// [`HomModel`] and `x` to `size` values. The callbacks of `model` are called
-/// from this thread only, while the function runs.
+/// [`HomModel`], with a valid or `NULL` observer, and `x` to `size` values. The
+/// callbacks of `model` and its observer are called from this thread only,
+/// while the function runs.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hom_solve(
     solver: *mut HomSolver,
@@ -175,14 +188,19 @@ pub unsafe extern "C" fn hom_solve(
     if x.is_null() || model.num_residuals != size || model.num_unknowns != size {
         return HomStatus::InvalidArgument;
     }
+    let model_observer = model.observer;
     // SAFETY: guaranteed by the caller
     let Some(mut model) = (unsafe { CModel::new(model) }) else {
         return HomStatus::InvalidArgument;
     };
     // SAFETY: guaranteed by the caller
     let x = unsafe { std::slice::from_raw_parts_mut(x, size) };
+    // SAFETY: guaranteed by the caller
+    let mut observer = unsafe { CObserver::new(model_observer) };
 
-    let result = catch_unwind(AssertUnwindSafe(|| solver.solver.solve(&mut model, x)));
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        solver.solver.solve_observed(&mut model, &mut observer, x)
+    }));
     match result {
         Ok(Ok(solved)) => {
             // SAFETY: guaranteed by the caller
@@ -225,6 +243,7 @@ pub unsafe extern "C" fn hom_solve_own_homotopy(
     if x.is_null() || model.num_residuals != size || model.num_unknowns != size + 1 {
         return HomStatus::InvalidArgument;
     }
+    let model_observer = model.observer;
     // SAFETY: guaranteed by the caller
     let Some(mut model) = (unsafe { CModel::new(model) }) else {
         return HomStatus::InvalidArgument;
@@ -237,8 +256,13 @@ pub unsafe extern "C" fn hom_solve_own_homotopy(
         Direction::Positive
     };
 
+    // SAFETY: guaranteed by the caller
+    let mut observer = unsafe { CObserver::new(model_observer) };
+
     let result = catch_unwind(AssertUnwindSafe(|| {
-        solver.solver.solve_own_homotopy(&mut model, x, first)
+        solver
+            .solver
+            .solve_own_homotopy_observed(&mut model, first, &mut observer, x)
     }));
     match result {
         Ok(Ok(direction)) => {
@@ -253,5 +277,23 @@ pub unsafe extern "C" fn hom_solve_own_homotopy(
         }
         Ok(Err(error)) => error.into(),
         Err(_) => HomStatus::Panic,
+    }
+}
+
+/// The statistics of the latest solve of `solver`, zeros for `NULL`.
+///
+/// # Safety
+///
+/// `solver` must be `NULL` or come from [`hom_solver_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hom_solver_statistics(solver: *const HomSolver) -> HomStatistics {
+    // SAFETY: guaranteed by the caller
+    let Some(solver) = (unsafe { solver.as_ref() }) else {
+        return HomStatistics::default();
+    };
+    let statistics = solver.solver.statistics();
+    HomStatistics {
+        newton_iterations: statistics.newton_iterations,
+        path_steps: statistics.path_steps,
     }
 }

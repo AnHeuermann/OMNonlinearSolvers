@@ -27,7 +27,7 @@
 
 //! The strategy of `solveHomotopy` in the C runtime: which solver runs when.
 
-use crate::path_follower::{Direction, follow_path};
+use crate::path_follower::{Direction, NoObserver, PathObserver, follow_path};
 use crate::settings::Settings;
 use crate::{FixpointHomotopy, NewtonHomotopy};
 use faer::{ColRef, Mat};
@@ -111,6 +111,16 @@ enum Start {
     Ready,
 }
 
+/// Statistics of the latest solve of a [`HomotopySolver`].
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Statistics {
+    /// Iterations of all runs of Newton's method, also the failed ones
+    pub newton_iterations: usize,
+    /// Accepted steps of the homotopy path that led to the solution, 0 without
+    /// a homotopy
+    pub path_steps: usize,
+}
+
 /// The damped Newton solver combined with homotopies, `solveHomotopy` of the
 /// C runtime.
 ///
@@ -133,6 +143,7 @@ pub struct HomotopySolver {
     /// Residual scaling of the latest successful solve, zero otherwise. Only
     /// the test of an already solved start point uses it.
     res_scaling: Box<[f64]>,
+    statistics: Statistics,
 }
 
 impl HomotopySolver {
@@ -153,7 +164,13 @@ impl HomotopySolver {
             x_scaling: vec![1.0; size + 1].into(),
             jacobian: Mat::zeros(size, size + 1),
             res_scaling: vec![0.0; size].into(),
+            statistics: Statistics::default(),
         }
+    }
+
+    /// The statistics of the latest solve.
+    pub fn statistics(&self) -> Statistics {
+        self.statistics
     }
 
     /// Solve `F(x) = 0` for `model` from the start point `x`.
@@ -185,6 +202,25 @@ impl HomotopySolver {
         model: &mut M,
         x: &mut [f64],
     ) -> Result<Solved, HomotopyError> {
+        self.solve_observed(model, &mut NoObserver, x)
+    }
+
+    /// [`HomotopySolver::solve`], reporting the events of the homotopy paths
+    /// to `observer`.
+    ///
+    /// # Errors
+    ///
+    /// Like [`HomotopySolver::solve`].
+    ///
+    /// # Panics
+    ///
+    /// Like [`HomotopySolver::solve`].
+    pub fn solve_observed<M: ModelFunctions>(
+        &mut self,
+        model: &mut M,
+        observer: &mut impl PathObserver,
+        x: &mut [f64],
+    ) -> Result<Solved, HomotopyError> {
         let n = self.x_start.len();
         assert_eq!(model.info().num_unknowns, n, "Model has wrong size");
         assert_eq!(model.info().num_residuals, n, "Model has wrong size");
@@ -193,8 +229,9 @@ impl HomotopySolver {
         self.x_start.copy_from_slice(x);
         scaling::variables(&model.info().nominal, x, &mut self.x_scaling[..n]);
         self.x_scaling[n] = 1.0;
+        self.statistics = Statistics::default();
 
-        let result = self.solve_from_start(model, x);
+        let result = self.solve_from_start(model, observer, x);
         match &result {
             Ok(solved) => debug!(target: "NLS", "Solved with {solved:?}"),
             Err(error) => {
@@ -227,8 +264,28 @@ impl HomotopySolver {
     pub fn solve_own_homotopy<M: ModelFunctions>(
         &mut self,
         model: &mut M,
-        x: &mut [f64],
         first: Direction,
+        x: &mut [f64],
+    ) -> Result<Direction, HomotopyError> {
+        self.solve_own_homotopy_observed(model, first, &mut NoObserver, x)
+    }
+
+    /// [`HomotopySolver::solve_own_homotopy`], reporting the events of the
+    /// paths to `observer`.
+    ///
+    /// # Errors
+    ///
+    /// Like [`HomotopySolver::solve_own_homotopy`].
+    ///
+    /// # Panics
+    ///
+    /// Like [`HomotopySolver::solve_own_homotopy`].
+    pub fn solve_own_homotopy_observed<M: ModelFunctions>(
+        &mut self,
+        model: &mut M,
+        first: Direction,
+        observer: &mut impl PathObserver,
+        x: &mut [f64],
     ) -> Result<Direction, HomotopyError> {
         let n = self.x_start.len();
         assert_eq!(model.info().num_residuals, n, "Model has wrong size");
@@ -242,6 +299,7 @@ impl HomotopySolver {
         self.x_start.copy_from_slice(x);
         scaling::variables(&model.info().nominal[..n], x, &mut self.x_scaling[..n]);
         self.x_scaling[n] = 1.0;
+        self.statistics = Statistics::default();
 
         for direction in [first, first.opposite()] {
             x.copy_from_slice(&self.x_start);
@@ -251,10 +309,14 @@ impl HomotopySolver {
                 direction,
                 self.newton_settings.f_tol(),
                 &self.settings,
+                observer,
                 x,
             );
             match path {
-                Ok(_) => return Ok(direction),
+                Ok(steps) => {
+                    self.statistics.path_steps = steps;
+                    return Ok(direction);
+                }
                 Err(error) => {
                     debug!(target: "NLS", "Homotopy in {direction:?} direction: {error:?}")
                 }
@@ -269,6 +331,7 @@ impl HomotopySolver {
     fn solve_from_start<M: ModelFunctions>(
         &mut self,
         model: &mut M,
+        observer: &mut impl PathObserver,
         x: &mut [f64],
     ) -> Result<Solved, HomotopyError> {
         let casual_tearing_set = model.info().casual_tearing_set;
@@ -287,10 +350,13 @@ impl HomotopySolver {
 
         for run in RUNS {
             x.copy_from_slice(&self.x0);
-            if let Err(error) = self.follow(model, run, x) {
-                debug!(target: "NLS", "Homotopy {run:?}: {error:?}");
-                continue;
-            }
+            let steps = match self.follow(model, run, observer, x) {
+                Ok(steps) => steps,
+                Err(error) => {
+                    debug!(target: "NLS", "Homotopy {run:?}: {error:?}");
+                    continue;
+                }
+            };
             // The C runtime gives up if the end of a path can't start Newton's
             // method
             model
@@ -299,6 +365,7 @@ impl HomotopySolver {
             check_linear_system(model, x, &self.fx0, &self.x_scaling, &mut self.jacobian)
                 .map_err(|_| HomotopyError::NotSolved)?;
             if self.newton(model, x) {
+                self.statistics.path_steps = steps;
                 return Ok(Solved::Homotopy(run));
             }
         }
@@ -365,7 +432,9 @@ impl HomotopySolver {
 
     /// Newton's method from `x`. Keeps its residual scaling on success.
     fn newton<M: ModelFunctions>(&mut self, model: &mut M, x: &mut [f64]) -> bool {
-        match newton::solve(model, x, &self.newton_settings, &mut self.newton) {
+        let result = newton::solve(model, x, &self.newton_settings, &mut self.newton);
+        self.statistics.newton_iterations += self.newton.iterations();
+        match result {
             Ok(_) => {
                 self.res_scaling.copy_from_slice(self.newton.res_scaling());
                 true
@@ -383,6 +452,7 @@ impl HomotopySolver {
         &mut self,
         model: &mut M,
         run: HomotopyRun,
+        observer: &mut impl PathObserver,
         x: &mut [f64],
     ) -> Result<usize, crate::PathError> {
         let n = self.x0.len();
@@ -401,6 +471,7 @@ impl HomotopySolver {
                     direction,
                     f_tol,
                     &self.settings,
+                    observer,
                     x,
                 )
             }
@@ -412,6 +483,7 @@ impl HomotopySolver {
                     Direction::Positive,
                     f_tol,
                     &self.settings,
+                    observer,
                     x,
                 )
             }

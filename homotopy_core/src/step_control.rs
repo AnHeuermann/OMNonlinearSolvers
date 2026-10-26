@@ -46,8 +46,10 @@ pub(crate) enum StepFailure {
     /// The corrector neither reached the path nor moved away from the
     /// predicted point
     CorrectorStuck,
-    /// The maximum number of tries of one step is used up
-    TooManyTries,
+    /// A step failed with the step size already at `tau_min`
+    TauAtMinimum,
+    /// The maximum number of `tries` of one step is used up
+    TooManyTries { tries: usize },
 }
 
 /// What the path following does after a step, see [`control`].
@@ -90,8 +92,9 @@ pub(crate) fn bend(y0: &[f64], yt: &[f64], y1: &[f64]) -> f64 {
 ///   `adapt_bend`. Then `τ` grows by `tau_increasing_factor`, up to `tau_max`,
 ///   if it bent less than `adapt_bend / tau_increasing_threshold`.
 /// * Otherwise `τ` shrinks by `tau_decreasing_factor`, down to `tau_min`, and
-///   `tries` counts up. A step with `τ` already at `tau_min` uses up all
-///   tries. The path following fails once `max_tries` tries are reached.
+///   `tries` counts up. The path following fails once `max_tries` tries are
+///   reached, or at once if `τ` was already at `tau_min`. In the C runtime
+///   that step uses up all tries, and it reports the two cases differently.
 /// * A corrector that didn't fail, didn't converge and stayed at the
 ///   predicted point (`bend < ε`) fails the path following.
 ///
@@ -120,13 +123,12 @@ pub(crate) fn control(
     }
 
     let smaller_tau = settings.tau_min.max(tau / settings.tau_decreasing_factor);
-    let tries = if smaller_tau == tau {
-        settings.max_tries
-    } else {
-        tries + 1
-    };
+    if smaller_tau == tau {
+        return Control::Fail(StepFailure::TauAtMinimum);
+    }
+    let tries = tries + 1;
     if tries >= settings.max_tries {
-        return Control::Fail(StepFailure::TooManyTries);
+        return Control::Fail(StepFailure::TooManyTries { tries });
     }
     Control::Retry {
         tau: smaller_tau,
@@ -216,7 +218,7 @@ mod step_control_tests {
         );
         assert_eq!(
             control_default(Outcome::Failed, 0.0, 1e-4, 1),
-            Control::Fail(StepFailure::TooManyTries)
+            Control::Fail(StepFailure::TauAtMinimum)
         );
     }
 
@@ -232,7 +234,7 @@ mod step_control_tests {
         );
         assert_eq!(
             control_default(Outcome::Failed, 0.0, 0.2, 9),
-            Control::Fail(StepFailure::TooManyTries)
+            Control::Fail(StepFailure::TooManyTries { tries: 10 })
         );
     }
 }

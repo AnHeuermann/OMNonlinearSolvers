@@ -29,6 +29,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "homotopy_capi.h"
 
@@ -135,6 +136,90 @@ static void solve_own_homotopy(void) {
   hom_solver_free(solver);
 }
 
+/* The events of the paths, see observe_paths */
+typedef struct Events {
+  int paths;
+  int accepted;
+  size_t finishedSteps;
+  HomPathFailure failure;
+  double failureValue;
+} Events;
+
+static void path_started(void *user, int direction, const double *y, size_t size) {
+  (void)direction;
+  (void)y;
+  (void)size;
+  ((Events *)user)->paths++;
+}
+
+static void step_accepted(void *user, const double *y, size_t size) {
+  (void)y;
+  (void)size;
+  ((Events *)user)->accepted++;
+}
+
+static void path_finished(void *user, const double *y, size_t size, size_t steps) {
+  (void)y;
+  (void)size;
+  ((Events *)user)->finishedSteps = steps;
+}
+
+static void path_failed(void *user, HomPathFailure failure, double value) {
+  ((Events *)user)->failure = failure;
+  ((Events *)user)->failureValue = value;
+}
+
+static void observe_paths(void) {
+  HomSolver *solver = hom_solver_new(1, NULL);
+  Events events = {0};
+  HomObserver observer = {0};
+  observer.user = &events;
+  observer.path_started = path_started;
+  observer.step_accepted = step_accepted; /* step_started stays NULL */
+  observer.path_finished = path_finished;
+  observer.path_failed = path_failed;
+  HomModel model = {0};
+  model.num_residuals = model.num_unknowns = 1;
+  model.residual = cubic;
+  model.observer = &observer;
+  double x[1] = {0.0};
+
+  CHECK(hom_solve(solver, &model, x, NULL) == HOM_STATUS_SOLVED);
+  CHECK(events.paths == 2); /* the first falls below λ = −1 */
+  CHECK(events.failure == HOM_PATH_FAILURE_LAMBDA_BELOW_MINUS_ONE);
+  CHECK(events.failureValue < -1.0);
+  CHECK(events.finishedSteps > 0 && events.accepted >= (int)events.finishedSteps);
+
+  HomStatistics statistics = hom_solver_statistics(solver);
+  CHECK(statistics.path_steps == events.finishedSteps);
+  CHECK(statistics.newton_iterations > 0);
+  hom_solver_free(solver);
+}
+
+static int newtonMessages = 0;
+
+/* Counts the messages of Newton's method */
+static void logger(HomLogLevel level, const char *target, const char *message) {
+  (void)level;
+  if (strcmp(target, "NLS") == 0 && strncmp(message, "Newton iteration", 16) == 0) {
+    newtonMessages++;
+  }
+}
+
+static void log_messages(void) {
+  HomSolver *solver = hom_solver_new(1, NULL);
+  HomModel model = {0};
+  model.num_residuals = model.num_unknowns = 1;
+  model.residual = cubic;
+  double x[1] = {1.0};
+
+  hom_set_logger(logger, 5); /* up to trace */
+  CHECK(hom_solve(solver, &model, x, NULL) == HOM_STATUS_SOLVED);
+  hom_set_logger(NULL, 0);
+  CHECK(newtonMessages > 0);
+  hom_solver_free(solver);
+}
+
 static void settings(void) {
   HomSettings settings = {0};
   settings.tau_start = 0.1;
@@ -168,6 +253,8 @@ int main(void) {
   solve_with_jacobian();
   model_error();
   solve_own_homotopy();
+  observe_paths();
+  log_messages();
   settings();
   invalid_arguments();
 
