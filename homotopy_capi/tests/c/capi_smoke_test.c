@@ -220,6 +220,31 @@ static void log_messages(void) {
   hom_solver_free(solver);
 }
 
+/* Solves the cubic in place of hybrd, counting its calls in user */
+static int fallback(void *user, double *x) {
+  (*(int *)user)++;
+  x[0] = ROOT;
+  return 1;
+}
+
+static void solve_with_fallback(void) {
+  HomSolver *solver = hom_solver_new(1, NULL);
+  int calls = 0;
+  HomModel model = {0};
+  model.user = &calls;
+  model.num_residuals = model.num_unknowns = 1;
+  model.residual = cubic;
+  model.fallback = fallback;
+  double x[1] = {0.0};
+  HomSolvedBy solved_by;
+
+  CHECK(hom_solve(solver, &model, x, &solved_by) == HOM_STATUS_SOLVED);
+  CHECK(solved_by == HOM_SOLVED_BY_FALLBACK);
+  CHECK(calls == 1);
+  CHECK(x[0] == ROOT);
+  hom_solver_free(solver);
+}
+
 static void settings(void) {
   HomSettings settings = {0};
   settings.tau_start = 0.1;
@@ -253,6 +278,7 @@ int main(void) {
   solve_with_jacobian();
   model_error();
   solve_own_homotopy();
+  solve_with_fallback();
   observe_paths();
   log_messages();
   settings();

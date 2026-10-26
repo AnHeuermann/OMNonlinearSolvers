@@ -71,4 +71,6 @@ mod tangent;
 
 pub use homotopy_function::{FixpointHomotopy, NewtonHomotopy};
 pub use path_follower::{Direction, NoObserver, PathError, PathObserver, follow_path};
-pub use strategy::{HomotopyError, HomotopyRun, HomotopySolver, Solved, Statistics};
+pub use strategy::{
+    Fallback, HomotopyError, HomotopyRun, HomotopySolver, NoFallback, Solved, Statistics,
+};

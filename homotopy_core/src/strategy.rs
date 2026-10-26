@@ -73,6 +73,40 @@ pub enum Solved {
     Newton,
     /// Newton's method from the end of the path of a homotopy
     Homotopy(HomotopyRun),
+    /// The [`Fallback`] solver, after Newton's method failed
+    Fallback,
+}
+
+/// A solver the strategy tries whenever Newton's method fails, before the
+/// next homotopy, like the C runtime tries hybrd of Minpack.
+pub trait Fallback {
+    /// Solve `model` from `x`, the start point of the failed Newton's method,
+    /// and return whether it solved it. `x` holds the solution then, and is
+    /// unspecified otherwise.
+    fn solve<M: ModelFunctions>(&mut self, model: &mut M, x: &mut [f64]) -> bool;
+}
+
+/// A [`Fallback`] that never solves, so the homotopies follow Newton's method
+/// directly
+pub struct NoFallback;
+
+impl Fallback for NoFallback {
+    fn solve<M: ModelFunctions>(&mut self, _: &mut M, _: &mut [f64]) -> bool {
+        false
+    }
+}
+
+/// A closure is a [`Fallback`] that doesn't need the model
+impl<F: FnMut(&mut [f64]) -> bool> Fallback for F {
+    fn solve<M: ModelFunctions>(&mut self, _: &mut M, x: &mut [f64]) -> bool {
+        self(x)
+    }
+}
+
+/// Which solver solved after Newton's method was started
+enum Solver {
+    Newton,
+    Fallback,
 }
 
 /// Why [`HomotopySolver`] found no solution.
@@ -134,6 +168,8 @@ pub struct HomotopySolver {
     x_start: Box<[f64]>,
     /// The start point of Newton's method and the homotopies, maybe moved
     x0: Box<[f64]>,
+    /// The start point of the latest Newton's method, for the fallback
+    x_newton: Box<[f64]>,
     /// `F(x₀)`
     fx0: Box<[f64]>,
     /// Variable scaling of the `n` unknowns and `λ`
@@ -160,6 +196,7 @@ impl HomotopySolver {
             newton: NewtonWorkspace::new(size, size),
             x_start: vec![0.0; size].into(),
             x0: vec![0.0; size].into(),
+            x_newton: vec![0.0; size].into(),
             fx0: vec![0.0; size].into(),
             x_scaling: vec![1.0; size + 1].into(),
             jacobian: Mat::zeros(size, size + 1),
@@ -186,8 +223,9 @@ impl HomotopySolver {
     ///
     /// A casual tearing set gives up after the first failure. `x` holds the
     /// solution on success and is unchanged otherwise. From `solveHomotopy`,
-    /// without the hybrd fallback and without the handling of mixed systems,
-    /// which belongs to the C interface.
+    /// without the handling of mixed systems, which belongs to the C
+    /// interface. [`HomotopySolver::solve_with`] adds the hybrd fallback of the
+    /// C runtime.
     ///
     /// # Errors
     ///
@@ -202,11 +240,12 @@ impl HomotopySolver {
         model: &mut M,
         x: &mut [f64],
     ) -> Result<Solved, HomotopyError> {
-        self.solve_observed(model, &mut NoObserver, x)
+        self.solve_with(model, &mut NoObserver, &mut NoFallback, x)
     }
 
     /// [`HomotopySolver::solve`], reporting the events of the homotopy paths
-    /// to `observer`.
+    /// to `observer` and trying `fallback` whenever Newton's method fails,
+    /// except for a casual tearing set.
     ///
     /// # Errors
     ///
@@ -215,10 +254,11 @@ impl HomotopySolver {
     /// # Panics
     ///
     /// Like [`HomotopySolver::solve`].
-    pub fn solve_observed<M: ModelFunctions>(
+    pub fn solve_with<M: ModelFunctions>(
         &mut self,
         model: &mut M,
         observer: &mut impl PathObserver,
+        fallback: &mut impl Fallback,
         x: &mut [f64],
     ) -> Result<Solved, HomotopyError> {
         let n = self.x_start.len();
@@ -231,7 +271,7 @@ impl HomotopySolver {
         self.x_scaling[n] = 1.0;
         self.statistics = Statistics::default();
 
-        let result = self.solve_from_start(model, observer, x);
+        let result = self.solve_from_start(model, observer, fallback, x);
         match &result {
             Ok(solved) => debug!(target: "NLS", "Solved with {solved:?}"),
             Err(error) => {
@@ -267,7 +307,7 @@ impl HomotopySolver {
         first: Direction,
         x: &mut [f64],
     ) -> Result<Direction, HomotopyError> {
-        self.solve_own_homotopy_observed(model, first, &mut NoObserver, x)
+        self.solve_own_homotopy_with(model, first, &mut NoObserver, x)
     }
 
     /// [`HomotopySolver::solve_own_homotopy`], reporting the events of the
@@ -280,7 +320,7 @@ impl HomotopySolver {
     /// # Panics
     ///
     /// Like [`HomotopySolver::solve_own_homotopy`].
-    pub fn solve_own_homotopy_observed<M: ModelFunctions>(
+    pub fn solve_own_homotopy_with<M: ModelFunctions>(
         &mut self,
         model: &mut M,
         first: Direction,
@@ -332,6 +372,7 @@ impl HomotopySolver {
         &mut self,
         model: &mut M,
         observer: &mut impl PathObserver,
+        fallback: &mut impl Fallback,
         x: &mut [f64],
     ) -> Result<Solved, HomotopyError> {
         let casual_tearing_set = model.info().casual_tearing_set;
@@ -341,8 +382,10 @@ impl HomotopySolver {
             return Ok(Solved::StartPoint);
         }
 
-        if self.newton(model, x) {
-            return Ok(Solved::Newton);
+        match self.newton_then_fallback(model, fallback, x) {
+            Some(Solver::Newton) => return Ok(Solved::Newton),
+            Some(Solver::Fallback) => return Ok(Solved::Fallback),
+            None => {}
         }
         if casual_tearing_set {
             return Err(HomotopyError::NotSolved);
@@ -364,9 +407,13 @@ impl HomotopySolver {
                 .map_err(|_| HomotopyError::NotSolved)?;
             check_linear_system(model, x, &self.fx0, &self.x_scaling, &mut self.jacobian)
                 .map_err(|_| HomotopyError::NotSolved)?;
-            if self.newton(model, x) {
-                self.statistics.path_steps = steps;
-                return Ok(Solved::Homotopy(run));
+            match self.newton_then_fallback(model, fallback, x) {
+                Some(Solver::Newton) => {
+                    self.statistics.path_steps = steps;
+                    return Ok(Solved::Homotopy(run));
+                }
+                Some(Solver::Fallback) => return Ok(Solved::Fallback),
+                None => {}
             }
         }
         Err(HomotopyError::NotSolved)
@@ -428,6 +475,30 @@ impl HomotopySolver {
             }
         }
         unreachable!("the last attempt returns")
+    }
+
+    /// Newton's method from `x`, and if it fails `fallback` from the same
+    /// start point, except for a casual tearing set. Returns the solver that
+    /// solved, `x` holds the solution then.
+    fn newton_then_fallback<M: ModelFunctions>(
+        &mut self,
+        model: &mut M,
+        fallback: &mut impl Fallback,
+        x: &mut [f64],
+    ) -> Option<Solver> {
+        self.x_newton.copy_from_slice(x);
+        if self.newton(model, x) {
+            return Some(Solver::Newton);
+        }
+        if model.info().casual_tearing_set {
+            return None;
+        }
+        x.copy_from_slice(&self.x_newton);
+        if fallback.solve(model, x) {
+            debug!(target: "NLS", "Solved by the fallback");
+            return Some(Solver::Fallback);
+        }
+        None
     }
 
     /// Newton's method from `x`. Keeps its residual scaling on success.

@@ -50,7 +50,8 @@ pub use exports::{
 };
 pub use logger::{HomLogLevel, HomLogger, hom_set_logger};
 pub use model::{
-    HOM_EVAL_ASSERT, HOM_EVAL_CONSTRAINT_VIOLATED, HOM_EVAL_OK, HomJacobian, HomModel, HomResidual,
+    HOM_EVAL_ASSERT, HOM_EVAL_CONSTRAINT_VIOLATED, HOM_EVAL_OK, HomFallback, HomJacobian, HomModel,
+    HomResidual,
 };
 pub use observer::{
     HomObserver, HomPathFailed, HomPathFailure, HomPathFinished, HomPathStarted, HomStepAccepted,

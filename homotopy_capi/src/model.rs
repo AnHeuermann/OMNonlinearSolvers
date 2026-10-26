@@ -29,6 +29,7 @@
 
 use crate::observer::HomObserver;
 use faer::MatMut;
+use homotopy_core::Fallback;
 use nls_model::{EvalError, ModelFunctions, SystemInfo, forward_differences};
 use std::ffi::{c_int, c_void};
 
@@ -62,6 +63,12 @@ pub type HomJacobian = Option<
     ) -> c_int,
 >;
 
+/// Solve the system from `x`, the start point of a failed Newton's method,
+/// for example with hybrd of Minpack. Returns nonzero if `x` holds a solution
+/// then. Called whenever Newton's method fails, except for a casual tearing
+/// set, and before the next homotopy. Must return like [`HomResidual`].
+pub type HomFallback = Option<unsafe extern "C" fn(user: *mut c_void, x: *mut f64) -> c_int>;
+
 /// A nonlinear system `F(x) = 0` of a C host.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -89,6 +96,34 @@ pub struct HomModel {
     pub jacobian: HomJacobian,
     /// Gets the events of the homotopy paths, or `NULL`
     pub observer: *const HomObserver,
+    /// Solves the system when Newton's method fails, or `NULL`
+    pub fallback: HomFallback,
+}
+
+/// The fallback of a [`HomModel`] as a fallback of the solver.
+pub(crate) struct CFallback {
+    callback: HomFallback,
+    user: *mut c_void,
+}
+
+impl CFallback {
+    pub(crate) fn new(model: &HomModel) -> Self {
+        CFallback {
+            callback: model.fallback,
+            user: model.user,
+        }
+    }
+}
+
+impl Fallback for CFallback {
+    fn solve<M: ModelFunctions>(&mut self, model: &mut M, x: &mut [f64]) -> bool {
+        let Some(callback) = self.callback else {
+            return false;
+        };
+        assert_eq!(x.len(), model.info().num_unknowns);
+        // SAFETY: `x` has the size of the model
+        unsafe { callback(self.user, x.as_mut_ptr()) != 0 }
+    }
 }
 
 /// A [`HomModel`] as a model of the solvers.

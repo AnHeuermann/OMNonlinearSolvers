@@ -97,6 +97,7 @@ fn model(size: usize, residual: HomResidual) -> HomModel {
         residual,
         jacobian: None,
         observer: null(),
+        fallback: None,
     }
 }
 
@@ -544,4 +545,36 @@ fn logger_test() {
     let (status, _) = solve(&model(1, Some(cubic)), &mut x);
     assert_eq!(status, HomStatus::Solved);
     assert!(MESSAGES.lock().unwrap().is_empty());
+}
+
+/// A fallback that solves the cubic, counting its calls in `user` and
+/// checking that it starts where Newton's method started
+unsafe extern "C" fn cubic_fallback(user: *mut c_void, x: *mut f64) -> c_int {
+    unsafe {
+        *(user as *mut usize) += 1;
+        assert_eq!(*x, 0.0, "the start point of Newton's method");
+        *x = -1.769_292_354_238_631;
+    }
+    1
+}
+
+#[test]
+/// The fallback solves after Newton's method failed, before any homotopy
+fn fallback_test() {
+    let mut calls = 0_usize;
+    let model = HomModel {
+        user: (&raw mut calls).cast(),
+        fallback: Some(cubic_fallback),
+        ..model(1, Some(cubic))
+    };
+    let mut x = [0.0];
+
+    let (status, solved_by) = solve(&model, &mut x);
+
+    assert_eq!(
+        (status, solved_by),
+        (HomStatus::Solved, Some(HomSolvedBy::Fallback))
+    );
+    assert_eq!(calls, 1);
+    assert_eq!(x, [-1.769_292_354_238_631]);
 }

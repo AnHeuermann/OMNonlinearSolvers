@@ -30,7 +30,7 @@
 //! Every function checks its pointers and catches panics, so neither a null
 //! pointer nor a panic reaches the host as undefined behaviour.
 
-use crate::model::{CModel, HomModel};
+use crate::model::{CFallback, CModel, HomModel};
 use crate::observer::CObserver;
 use crate::settings::HomSettings;
 use homotopy_core::{Direction, HomotopyError, HomotopyRun, HomotopySolver, Solved};
@@ -90,6 +90,8 @@ pub enum HomSolvedBy {
     OwnHomotopyPositive,
     /// The model's own homotopy towards decreasing `λ`
     OwnHomotopyNegative,
+    /// The fallback of the model, after Newton's method failed
+    Fallback,
 }
 
 impl From<Solved> for HomSolvedBy {
@@ -100,6 +102,7 @@ impl From<Solved> for HomSolvedBy {
             Solved::Homotopy(HomotopyRun::NewtonPositive) => HomSolvedBy::HomotopyNewtonPositive,
             Solved::Homotopy(HomotopyRun::NewtonNegative) => HomSolvedBy::HomotopyNewtonNegative,
             Solved::Homotopy(HomotopyRun::Fixpoint) => HomSolvedBy::HomotopyFixpoint,
+            Solved::Fallback => HomSolvedBy::Fallback,
         }
     }
 }
@@ -189,6 +192,7 @@ pub unsafe extern "C" fn hom_solve(
         return HomStatus::InvalidArgument;
     }
     let model_observer = model.observer;
+    let mut fallback = CFallback::new(model);
     // SAFETY: guaranteed by the caller
     let Some(mut model) = (unsafe { CModel::new(model) }) else {
         return HomStatus::InvalidArgument;
@@ -199,7 +203,9 @@ pub unsafe extern "C" fn hom_solve(
     let mut observer = unsafe { CObserver::new(model_observer) };
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        solver.solver.solve_observed(&mut model, &mut observer, x)
+        solver
+            .solver
+            .solve_with(&mut model, &mut observer, &mut fallback, x)
     }));
     match result {
         Ok(Ok(solved)) => {
@@ -262,7 +268,7 @@ pub unsafe extern "C" fn hom_solve_own_homotopy(
     let result = catch_unwind(AssertUnwindSafe(|| {
         solver
             .solver
-            .solve_own_homotopy_observed(&mut model, first, &mut observer, x)
+            .solve_own_homotopy_with(&mut model, first, &mut observer, x)
     }));
     match result {
         Ok(Ok(direction)) => {

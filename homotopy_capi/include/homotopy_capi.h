@@ -69,6 +69,8 @@ typedef enum HomSolvedBy {
   HOM_SOLVED_BY_OWN_HOMOTOPY_POSITIVE,
   // The model's own homotopy towards decreasing `λ`
   HOM_SOLVED_BY_OWN_HOMOTOPY_NEGATIVE,
+  // The fallback of the model, after Newton's method failed
+  HOM_SOLVED_BY_FALLBACK,
 } HomSolvedBy;
 
 // A solver for systems of one size, created by [`hom_solver_new`] and
@@ -164,6 +166,12 @@ typedef struct HomObserver {
   HomPathFailed path_failed;
 } HomObserver;
 
+// Solve the system from `x`, the start point of a failed Newton's method,
+// for example with hybrd of Minpack. Returns nonzero if `x` holds a solution
+// then. Called whenever Newton's method fails, except for a casual tearing
+// set, and before the next homotopy. Must return like [`HomResidual`].
+typedef int (*HomFallback)(void *user, double *x);
+
 // A nonlinear system `F(x) = 0` of a C host.
 typedef struct HomModel {
   // Passed to the callbacks as it is
@@ -189,6 +197,8 @@ typedef struct HomModel {
   HomJacobian jacobian;
   // Gets the events of the homotopy paths, or `NULL`
   const struct HomObserver *observer;
+  // Solves the system when Newton's method fails, or `NULL`
+  HomFallback fallback;
 } HomModel;
 
 // Statistics of the latest solve of a [`HomSolver`].

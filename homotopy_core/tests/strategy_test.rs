@@ -29,7 +29,8 @@
 
 use homotopy_core::settings::Settings;
 use homotopy_core::{
-    Direction, HomotopyError, HomotopyRun, HomotopySolver, PathError, PathObserver, Solved,
+    Direction, HomotopyError, HomotopyRun, HomotopySolver, NoFallback, NoObserver, PathError,
+    PathObserver, Solved,
 };
 use newton::settings::Settings as NewtonSettings;
 use nls_model::{ClosureModel, EvalError, ModelFunctions};
@@ -273,7 +274,7 @@ fn observer_test() {
     let mut counter = Counter::default();
     let mut x = [0.0];
 
-    let result = solver.solve_observed(&mut model, &mut counter, &mut x);
+    let result = solver.solve_with(&mut model, &mut counter, &mut NoFallback, &mut x);
 
     assert!(matches!(
         result,
@@ -287,4 +288,82 @@ fn observer_test() {
         counter.accepted >= steps,
         "the accepted steps of both paths"
     );
+}
+
+/// `F(x) = x³ − 2x + 2`, which Newton's method doesn't solve from 0
+fn cubic_model() -> impl ModelFunctions {
+    ClosureModel::new(1, 1, |x: &[f64], f: &mut [f64]| {
+        f[0] = x[0].powi(3) - 2.0 * x[0] + 2.0;
+        Ok(())
+    })
+}
+
+/// The real root of the cubic
+const CUBIC_ROOT: f64 = -1.769_292_354_238_631;
+
+#[test]
+/// A fallback that solves comes before the homotopies. It starts where
+/// Newton's method started, not at its last iterate.
+fn fallback_test() {
+    let mut starts = Vec::new();
+    let mut fallback = |x: &mut [f64]| {
+        starts.push(x[0]);
+        x[0] = CUBIC_ROOT;
+        true
+    };
+    let mut counter = Counter::default();
+    let mut x = [0.0];
+
+    let result = solver(1).solve_with(&mut cubic_model(), &mut counter, &mut fallback, &mut x);
+
+    assert!(matches!(result, Ok(Solved::Fallback)), "got {result:?}");
+    assert_eq!(x, [CUBIC_ROOT]);
+    assert_eq!(starts, [0.0], "once, from the start point");
+    assert!(counter.paths.is_empty(), "no homotopy");
+}
+
+#[test]
+/// A fallback that fails leaves the system to the homotopies, and is tried
+/// again when Newton's method fails after a path
+fn failing_fallback_test() {
+    let mut calls = 0;
+    let mut fallback = |_: &mut [f64]| {
+        calls += 1;
+        false
+    };
+    let mut x = [0.0];
+
+    let result = solver(1).solve_with(&mut cubic_model(), &mut NoObserver, &mut fallback, &mut x);
+
+    assert!(
+        matches!(result, Ok(Solved::Homotopy(HomotopyRun::NewtonNegative))),
+        "got {result:?}"
+    );
+    assert!((x[0] - CUBIC_ROOT).abs() < 1e-10, "{x:?}");
+    assert_eq!(calls, 1, "Newton's method converges after the path");
+}
+
+#[test]
+/// A casual tearing set gives up when Newton's method fails, without the
+/// fallback
+fn fallback_casual_tearing_set_test() {
+    let mut model = ClosureModel::new(1, 1, |x: &[f64], f: &mut [f64]| {
+        f[0] = x[0].powi(3) - 2.0 * x[0] + 2.0;
+        Ok(())
+    })
+    .with_casual_tearing_set();
+    let mut calls = 0;
+    let mut fallback = |_: &mut [f64]| {
+        calls += 1;
+        true
+    };
+    let mut x = [0.0];
+
+    let result = solver(1).solve_with(&mut model, &mut NoObserver, &mut fallback, &mut x);
+
+    assert!(
+        matches!(result, Err(HomotopyError::NotSolved)),
+        "got {result:?}"
+    );
+    assert_eq!(calls, 0);
 }

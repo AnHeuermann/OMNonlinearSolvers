@@ -1,8 +1,10 @@
 # TODO
 
-* Check how to include hybrj_ from Minpack
-  * Use `SimulationRuntime/rust/minpack` from OpenModelica
-  * Use C ABI from OpenModelica and call `solveHybrd`
+* Offer hybrd of Minpack to pure Rust users. The OpenModelica glue passes
+  `solveHybrd` of the C runtime as the fallback of the C interface, a Rust
+  user could pass `SimulationRuntime/rust/minpack` of OpenModelica as a
+  `homotopy_core::Fallback`. Also check whether hybrj, with the analytical
+  Jacobian, is worth it.
 * Test how our implementation compares to a newton algorithm from
  [newton_rootfinder][newton_rootfinder] or [nrfind][nrfind] (or similar)
 * Move `ClosureModel` from `nls_model` into a test-support crate, e.g.
@@ -20,10 +22,6 @@
   the caller, as DESIGN.md asks.
 * Statistics of a solve, e.g. the number of iterations the C runtime adds to
   `numberOfIterations`. Add them together with the homotopy.
-* Maybe add the hybrd fallback of Minpack, which `solveHomotopy` tries when
-  Newton fails, before the homotopy runs. Left out for now, there is no
-  Minpack in Rust. It could also be a fallback solver passed in by
-  `homotopy_capi`.
 * Port corrector strategy 2 of `homotopyAlgorithm` (`homBacktraceStrategy`):
   back to the path orthogonally to the tangent, with the extended system of
   `orthogonalBacktraceMatrix`. Only strategy 1, the default, fixing one
