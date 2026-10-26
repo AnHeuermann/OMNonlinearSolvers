@@ -40,6 +40,49 @@ The design decisions behind the code are collected in [DESIGN.md](DESIGN.md).
 
 ## C Interface
 
+The `homotopy_capi` crate builds a static library with a generic C interface.
+Its header `homotopy_capi/include/homotopy_capi.h` is generated when the crate
+is built. A host describes its system as a `HomModel` of callbacks:
+
+```c
+#include <stdio.h>
+
+#include "homotopy_capi.h"
+
+/* F(x) = x³ − 2x + 2 */
+static int residual(void *user, const double *x, double *f) {
+  (void)user; /* the host's data, from model.user */
+  f[0] = x[0] * x[0] * x[0] - 2.0 * x[0] + 2.0;
+  return HOM_EVAL_OK; /* or HOM_EVAL_ASSERT, HOM_EVAL_CONSTRAINT_VIOLATED */
+}
+
+int main(void) {
+  HomSettings settings = {0}; /* 0 keeps a default */
+  HomSolver *solver = hom_solver_new(1, &settings);
+
+  HomModel model = {0};
+  model.num_residuals = model.num_unknowns = 1;
+  model.residual = residual;
+
+  double x[1] = {0.0}; /* the start point */
+  HomSolvedBy solved_by;
+  HomStatus status = hom_solve(solver, &model, x, &solved_by);
+  if (status == HOM_STATUS_SOLVED) {
+    printf("x = %g\n", x[0]);
+  }
+
+  hom_solver_free(solver);
+  return status == HOM_STATUS_SOLVED ? 0 : 1;
+}
+```
+
+The callbacks must return and must not leave with `longjmp`. Link the static
+library together with the system libraries it needs, on Linux
+`-lpthread -ldl -lm`. CI compiles and runs this example, see
+[homotopy_capi/tests/c](homotopy_capi/tests/c), which also has a test of the
+rest of the interface. The glue to the OpenModelica C runtime lives in
+OpenModelica and uses this interface.
+
 ## License
 
 This package is part of the OpenModelica Run-Time System and is distributed, at your choice,

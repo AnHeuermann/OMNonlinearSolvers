@@ -1,14 +1,9 @@
 # TODO
 
-* Split DataHomotopy into multiple structs
-  * Newton data
-  * Homotopy parameters
-  * Scaling vectors
-  * Tolerances and settings
-  * Statistics
 * Check how to include hybrj_ from Minpack
-* Move `max_number_of_iteartions` to configuration
-* Replace our implementation of a newton algorithm with
+  * Use `SimulationRuntime/rust/minpack` from OpenModelica
+  * Use C ABI from OpenModelica and call `solveHybrd`
+* Test how our implementation compares to a newton algorithm from
  [newton_rootfinder][newton_rootfinder] or [nrfind][nrfind] (or similar)
 * Move `ClosureModel` from `nls_model` into a test-support crate, e.g.
   `nls_test_problems`, used only as dev-dependency, so it is no longer part of

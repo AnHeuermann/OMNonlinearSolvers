@@ -89,37 +89,61 @@ pub trait ModelFunctions {
         fx: &[f64],
         jacobian: MatMut<'_, f64>,
     ) -> Result<(), EvalError> {
-        assert_eq!(x.len(), jacobian.ncols());
-        assert_eq!(fx.len(), jacobian.nrows());
+        forward_differences(self, x, fx, jacobian)
+    }
+}
 
-        let delta = (f64::EPSILON * 20.0).sqrt();
+/// The Jacobian `J(x)` of `model` by forward differences, the default of
+/// [`ModelFunctions::derivative`].
+///
+/// One evaluation of `F` per column, with the step `h = sqrt(20·ε)·(1 + |xⱼ|)`
+/// of the C runtime, backwards where `x + h` reaches the upper bound. `fx` is
+/// `F(x)`. Models that override `derivative` can fall back to it.
+///
+/// # Errors
+///
+/// Returns the [`EvalError`] of the model if `F` can't be evaluated at a
+/// perturbed point.
+///
+/// # Panics
+///
+/// Panics if the shape of `jacobian` doesn't match `x` and `fx`.
+pub fn forward_differences<M: ModelFunctions + ?Sized>(
+    model: &mut M,
+    x: &[f64],
+    fx: &[f64],
+    jacobian: MatMut<'_, f64>,
+) -> Result<(), EvalError> {
+    assert_eq!(x.len(), jacobian.ncols());
+    assert_eq!(fx.len(), jacobian.nrows());
 
-        let mut x_tilde = x.to_vec();
+    let delta = (f64::EPSILON * 20.0).sqrt();
 
-        for (j, col) in jacobian.col_iter_mut().enumerate() {
-            let mut h = delta * (1.0 + x[j].abs());
+    let mut x_tilde = x.to_vec();
 
-            // step backwards if x + h would reach the upper bound
-            if x[j] + h >= self.info().max[j] {
-                h *= -1.0;
-            }
+    for (j, col) in jacobian.col_iter_mut().enumerate() {
+        let mut h = delta * (1.0 + x[j].abs());
 
-            x_tilde[j] += h;
-
-            // col := F(x + h·eⱼ)
-            let column: &mut [f64] = col.try_as_col_major_mut().unwrap().as_slice_mut();
-            self.eval(&x_tilde, column)?;
-
-            // col := (F(x + h·eⱼ) − F(x)) / h
-            for i in 0..column.len() {
-                column[i] = (column[i] - fx[i]) / h;
-            }
-
-            x_tilde[j] = x[j]; // undo the perturbation
+        // step backwards if x + h would reach the upper bound
+        if x[j] + h >= model.info().max[j] {
+            h *= -1.0;
         }
 
-        Ok(())
+        x_tilde[j] += h;
+
+        // col := F(x + h·eⱼ)
+        let column: &mut [f64] = col.try_as_col_major_mut().unwrap().as_slice_mut();
+        model.eval(&x_tilde, column)?;
+
+        // col := (F(x + h·eⱼ) − F(x)) / h
+        for i in 0..column.len() {
+            column[i] = (column[i] - fx[i]) / h;
+        }
+
+        x_tilde[j] = x[j]; // undo the perturbation
     }
+
+    Ok(())
 }
 
 #[cfg(test)]

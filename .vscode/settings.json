@@ -1,4 +1,10 @@
 {
   "editor.indentSize": "tabSize",
-  "editor.tabSize": 4
+  "editor.tabSize": 4,
+  // CMake Tools: the C tests of the C interface, see CONTRIBUTING.md
+  "cmake.buildDirectory": "${workspaceFolder}/build_c",
+  "cmake.configureOnOpen": true,
+  // In a multi-root workspace with OpenModelica the test explorer mixes up the
+  // tests of both folders. "CMake: Run Tests" and the CTest button run them.
+  "cmake.ctest.testExplorerIntegrationEnabled": false
 }

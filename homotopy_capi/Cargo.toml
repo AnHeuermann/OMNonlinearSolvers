@@ -5,13 +5,18 @@ edition.workspace = true
 license.workspace = true
 
 [lib]
-# staticlib: linked into the OpenModelica C runtime.
+# staticlib: linked into a C host like the OpenModelica C runtime.
 # rlib: lets Rust tests and other crates use it.
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-nls_model = { path = "../nls_model" }
+faer.workspace = true
 homotopy_core = { path = "../homotopy_core" }
+newton = { path = "../newton" }
+nls_model = { path = "../nls_model" }
+
+[build-dependencies]
+cbindgen = "0.29.4"
 
 [lints]
 workspace = true

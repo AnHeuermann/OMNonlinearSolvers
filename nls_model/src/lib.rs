@@ -42,5 +42,5 @@ pub mod scaling;
 mod system_info;
 
 pub use closure_model::ClosureModel;
-pub use model_functions::{EvalError, ModelFunctions};
+pub use model_functions::{EvalError, ModelFunctions, forward_differences};
 pub use system_info::SystemInfo;

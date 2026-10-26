@@ -168,6 +168,6 @@ Not ported one by one:
 * the `print*` and `debug*` functions, they become `trace!` with `Display`.
 
 The handling of mixed systems (relations) and `discreteCall` is runtime state,
-not numerics, and stays in `homotopy_capi`.
+not numerics, and stays in OpenModelica's glue to `homotopy_capi`.
 
 [c-source]: https://github.com/OpenModelica/OpenModelica/blob/18d4ff455d1beceb4709d770ca4faf53d65732da/OMCompiler/SimulationRuntime/c/simulation/solver/nonlinearSolverHomotopy.c
