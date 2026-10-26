@@ -99,10 +99,14 @@ pub fn rows(mut matrix: MatMut<'_, f64>) {
     let n = matrix.nrows();
     assert_eq!(matrix.ncols(), n + 1, "Matrix has wrong shape");
 
-    for mut row in matrix.rb_mut().row_iter_mut() {
+    for row in matrix.rb_mut().row_iter_mut() {
         let maximum = row.rb().subcols(0, n).norm_max();
         let scale = if maximum <= DELTA { 1.0 } else { maximum };
-        row /= scale;
+        // Not `row /= scale`, faer multiplies by `1/scale`, which rounds
+        // differently from the division of C
+        for entry in row.iter_mut() {
+            *entry /= scale;
+        }
     }
 }
 

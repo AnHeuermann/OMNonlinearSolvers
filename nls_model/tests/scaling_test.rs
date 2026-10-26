@@ -78,6 +78,16 @@ fn row_scaling_test() {
 }
 
 #[test]
+/// Rows are divided by their maximum like in C. Multiplying by its reciprocal
+/// rounds differently: `5.0 * (1.0 / 7.0) != 5.0 / 7.0`.
+fn row_scaling_divides_test() {
+    let mut m = mat![[7.0, 5.0]];
+
+    rows(m.as_mut());
+    assert!(m[(0, 1)] == 5.0 / 7.0);
+}
+
+#[test]
 #[should_panic = "Matrix has wrong shape"]
 /// `rows` needs the right-hand side as last column, passing the square
 /// Jacobian `J` alone is a mistake
