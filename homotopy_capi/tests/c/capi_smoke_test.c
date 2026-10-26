@@ -245,6 +245,31 @@ static void solve_with_fallback(void) {
   hom_solver_free(solver);
 }
 
+/* Solves the 1×1 linear system, counting its calls in user */
+static int linear_solver(void *user, size_t n, double *matrix, double *rhs, double *determinant) {
+  (void)n;
+  (*(int *)user)++;
+  rhs[0] /= matrix[0];
+  *determinant = matrix[0];
+  return 0;
+}
+
+static void solve_with_linear_solver(void) {
+  HomSolver *solver = hom_solver_new(1, NULL);
+  int calls = 0;
+  HomModel model = {0};
+  model.user = &calls;
+  model.num_residuals = model.num_unknowns = 1;
+  model.residual = cubic;
+  model.linear_solver = linear_solver;
+  double x[1] = {-1.5};
+
+  CHECK(hom_solve(solver, &model, x, NULL) == HOM_STATUS_SOLVED);
+  CHECK(calls > 0);
+  CHECK(fabs(x[0] - ROOT) < 1e-10);
+  hom_solver_free(solver);
+}
+
 static void settings(void) {
   HomSettings settings = {0};
   settings.tau_start = 0.1;
@@ -279,6 +304,7 @@ int main(void) {
   model_error();
   solve_own_homotopy();
   solve_with_fallback();
+  solve_with_linear_solver();
   observe_paths();
   log_messages();
   settings();

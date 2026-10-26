@@ -65,6 +65,54 @@ unsafe extern "C" fn linear(_: *mut c_void, x: *const f64, f: *mut f64) -> c_int
     HOM_EVAL_OK
 }
 
+/// `F(x) = (x₀² + x₁ − 3, x₀·x₁ − 2)` with the root `(1, 2)`, which Newton
+/// solves in several iterations from `(1.5, 1.5)`
+unsafe extern "C" fn quadratic(_: *mut c_void, x: *const f64, f: *mut f64) -> c_int {
+    unsafe {
+        let x = std::slice::from_raw_parts(x, 2);
+        let f = std::slice::from_raw_parts_mut(f, 2);
+        f[0] = x[0] * x[0] + x[1] - 3.0;
+        f[1] = x[0] * x[1] - 2.0;
+    }
+    HOM_EVAL_OK
+}
+
+/// Solves a 2×2 system with Cramer's rule, counting its calls in `user`
+unsafe extern "C" fn cramer(
+    user: *mut c_void,
+    n: usize,
+    matrix: *mut f64,
+    rhs: *mut f64,
+    determinant: *mut f64,
+) -> c_int {
+    assert_eq!(n, 2);
+    unsafe {
+        *(user as *mut usize) += 1;
+        let a = std::slice::from_raw_parts(matrix, 4);
+        let b = std::slice::from_raw_parts_mut(rhs, 2);
+        let det = a[0] * a[3] - a[2] * a[1];
+        let y = [
+            (b[0] * a[3] - a[2] * b[1]) / det,
+            (a[0] * b[1] - b[0] * a[1]) / det,
+        ];
+        b.copy_from_slice(&y);
+        *determinant = det;
+    }
+    0
+}
+
+/// A linear solver that fails, counting its calls in `user`
+unsafe extern "C" fn failing_solver(
+    user: *mut c_void,
+    _: usize,
+    _: *mut f64,
+    _: *mut f64,
+    _: *mut f64,
+) -> c_int {
+    unsafe { *(user as *mut usize) += 1 };
+    1
+}
+
 /// Asserts everywhere
 unsafe extern "C" fn asserts(_: *mut c_void, _: *const f64, _: *mut f64) -> c_int {
     HOM_EVAL_ASSERT
@@ -98,6 +146,7 @@ fn model(size: usize, residual: HomResidual) -> HomModel {
         jacobian: None,
         observer: null(),
         fallback: None,
+        linear_solver: None,
     }
 }
 
@@ -143,6 +192,57 @@ fn homotopy_test() {
         (HomStatus::Solved, Some(HomSolvedBy::HomotopyNewtonNegative))
     );
     assert!((x[0] + 1.769_292_354_238_631).abs() < 1e-10, "{x:?}");
+}
+
+#[test]
+/// The linear solver callback solves the steps of Newton's method after the
+/// first, the solver negates its solution of `J·y = f`
+fn linear_solver_test() {
+    let mut calls = 0usize;
+    let model = HomModel {
+        user: (&raw mut calls).cast(),
+        linear_solver: Some(cramer),
+        ..model(2, Some(quadratic))
+    };
+    let mut x = [1.5, 1.5];
+
+    let (status, statistics) = unsafe {
+        let solver = hom_solver_new(2, null());
+        let mut solved_by = HomSolvedBy::StartPoint;
+        let status = hom_solve(solver, &model, x.as_mut_ptr(), &mut solved_by);
+        assert_eq!(solved_by, HomSolvedBy::Newton);
+        let statistics = hom_solver_statistics(solver);
+        hom_solver_free(solver);
+        (status, statistics)
+    };
+
+    assert_eq!(status, HomStatus::Solved);
+    assert!(
+        (x[0] - 1.0).abs() < 1e-6 && (x[1] - 2.0).abs() < 1e-6,
+        "{x:?}"
+    );
+    assert!(statistics.newton_iterations > 1);
+    assert_eq!(calls, statistics.newton_iterations - 1);
+}
+
+#[test]
+/// A failing linear solver callback fails Newton's method, and a casual
+/// tearing set gives up then
+fn failing_linear_solver_test() {
+    let mut calls = 0usize;
+    let model = HomModel {
+        user: (&raw mut calls).cast(),
+        casual_tearing_set: true,
+        linear_solver: Some(failing_solver),
+        ..model(2, Some(quadratic))
+    };
+    let mut x = [1.5, 1.5];
+
+    let (status, _) = solve(&model, &mut x);
+
+    assert_eq!(status, HomStatus::NotSolved);
+    assert_eq!(calls, 1);
+    assert_eq!(x, [1.5, 1.5], "unchanged");
 }
 
 #[test]

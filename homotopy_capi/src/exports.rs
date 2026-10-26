@@ -30,7 +30,7 @@
 //! Every function checks its pointers and catches panics, so neither a null
 //! pointer nor a panic reaches the host as undefined behaviour.
 
-use crate::model::{CFallback, CModel, HomModel};
+use crate::model::{CFallback, CLinearSolver, CModel, HomModel};
 use crate::observer::CObserver;
 use crate::settings::HomSettings;
 use homotopy_core::{Direction, HomotopyError, HomotopyRun, HomotopySolver, Solved};
@@ -41,6 +41,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 pub struct HomSolver {
     solver: HomotopySolver,
     size: usize,
+    /// Buffer of the matrix for the linear solver callback of a model
+    linear_system: Box<[f64]>,
 }
 
 /// Statistics of the latest solve of a [`HomSolver`].
@@ -140,6 +142,7 @@ pub unsafe extern "C" fn hom_solver_new(
         HomSolver {
             solver: HomotopySolver::new(size, newton, homotopy),
             size,
+            linear_system: vec![0.0; size * size].into(),
         }
     });
     match created {
@@ -193,6 +196,7 @@ pub unsafe extern "C" fn hom_solve(
     }
     let model_observer = model.observer;
     let mut fallback = CFallback::new(model);
+    let mut linear_solver = CLinearSolver::new(model, &mut solver.linear_system);
     // SAFETY: guaranteed by the caller
     let Some(mut model) = (unsafe { CModel::new(model) }) else {
         return HomStatus::InvalidArgument;
@@ -203,9 +207,13 @@ pub unsafe extern "C" fn hom_solve(
     let mut observer = unsafe { CObserver::new(model_observer) };
 
     let result = catch_unwind(AssertUnwindSafe(|| {
-        solver
-            .solver
-            .solve_with(&mut model, &mut observer, &mut fallback, x)
+        solver.solver.solve_with(
+            &mut model,
+            &mut observer,
+            &mut fallback,
+            &mut linear_solver,
+            x,
+        )
     }));
     match result {
         Ok(Ok(solved)) => {

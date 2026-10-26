@@ -172,6 +172,20 @@ typedef struct HomObserver {
 // set, and before the next homotopy. Must return like [`HomResidual`].
 typedef int (*HomFallback)(void *user, double *x);
 
+// Solve the linear system `matrix·y = rhs` of a step of Newton's method
+// after the first, for example with `dgesv` of LAPACK.
+//
+// `matrix` is the scaled Jacobian, a column-major `n×n` matrix that may be
+// overwritten. `rhs` holds the scaled residual and receives the solution
+// `y`. `determinant` receives the determinant of `matrix`, which decides
+// whether the system of a casual tearing set is singular. Returns 0 if
+// solved, nonzero if not. Must return like [`HomResidual`].
+typedef int (*HomLinearSolver)(void *user,
+                               size_t n,
+                               double *matrix,
+                               double *rhs,
+                               double *determinant);
+
 // A nonlinear system `F(x) = 0` of a C host.
 typedef struct HomModel {
   // Passed to the callbacks as it is
@@ -199,6 +213,9 @@ typedef struct HomModel {
   const struct HomObserver *observer;
   // Solves the system when Newton's method fails, or `NULL`
   HomFallback fallback;
+  // Solves the linear systems of Newton's method after its first step, or
+  // `NULL` for total pivoting, which solves the first step
+  HomLinearSolver linear_solver;
 } HomModel;
 
 // Statistics of the latest solve of a [`HomSolver`].

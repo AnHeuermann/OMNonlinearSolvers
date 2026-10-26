@@ -128,6 +128,15 @@ solves `A·y = 0` with one entry of `y` fixed to 1: fixing the last column
 solves `J·dy = -f`, letting the solver choose the column computes the tangent
 of a homotopy path. `f` itself is stored in the last column.
 
+### The host's linear solver for the later Newton steps
+
+The C runtime solves the first step of Newton's method with total pivoting,
+the later ones with the linear solver it is set to, LAPACK's `dgesv` by
+default. Its result depends on the LAPACK library the runtime links, so the
+port calls the host's solver through a `newton::LinearSolver`, in C the
+`linear_solver` callback of `HomModel`. Without one, total pivoting solves
+all steps.
+
 ### Permutations without moving data
 
 The pivot search swaps rows and columns of a `PermutedMatrix`, a view that

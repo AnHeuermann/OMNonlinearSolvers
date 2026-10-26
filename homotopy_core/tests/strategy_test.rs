@@ -27,12 +27,14 @@
 
 //! Tests of the strategy that combines Newton's method and the homotopies.
 
+use faer::Mat;
 use homotopy_core::settings::Settings;
 use homotopy_core::{
     Direction, HomotopyError, HomotopyRun, HomotopySolver, NoFallback, NoObserver, PathError,
     PathObserver, Solved,
 };
 use newton::settings::Settings as NewtonSettings;
+use newton::{LinearSolver, Singular, SolveStatus, TotalPivot};
 use nls_model::{ClosureModel, EvalError, ModelFunctions};
 
 /// A solver with the default settings for `size` unknowns
@@ -274,7 +276,13 @@ fn observer_test() {
     let mut counter = Counter::default();
     let mut x = [0.0];
 
-    let result = solver.solve_with(&mut model, &mut counter, &mut NoFallback, &mut x);
+    let result = solver.solve_with(
+        &mut model,
+        &mut counter,
+        &mut NoFallback,
+        &mut TotalPivot,
+        &mut x,
+    );
 
     assert!(matches!(
         result,
@@ -314,7 +322,13 @@ fn fallback_test() {
     let mut counter = Counter::default();
     let mut x = [0.0];
 
-    let result = solver(1).solve_with(&mut cubic_model(), &mut counter, &mut fallback, &mut x);
+    let result = solver(1).solve_with(
+        &mut cubic_model(),
+        &mut counter,
+        &mut fallback,
+        &mut TotalPivot,
+        &mut x,
+    );
 
     assert!(matches!(result, Ok(Solved::Fallback)), "got {result:?}");
     assert_eq!(x, [CUBIC_ROOT]);
@@ -333,7 +347,13 @@ fn failing_fallback_test() {
     };
     let mut x = [0.0];
 
-    let result = solver(1).solve_with(&mut cubic_model(), &mut NoObserver, &mut fallback, &mut x);
+    let result = solver(1).solve_with(
+        &mut cubic_model(),
+        &mut NoObserver,
+        &mut fallback,
+        &mut TotalPivot,
+        &mut x,
+    );
 
     assert!(
         matches!(result, Ok(Solved::Homotopy(HomotopyRun::NewtonNegative))),
@@ -341,6 +361,85 @@ fn failing_fallback_test() {
     );
     assert!((x[0] - CUBIC_ROOT).abs() < 1e-10, "{x:?}");
     assert_eq!(calls, 1, "Newton's method converges after the path");
+}
+
+/// A [`LinearSolver`] that counts its calls, solving with total pivoting
+/// unless it is `failing`
+#[derive(Default)]
+struct CountingSolver {
+    calls: usize,
+    failing: bool,
+}
+
+impl LinearSolver for CountingSolver {
+    fn solve(
+        &mut self,
+        system: &mut Mat<f64>,
+        casual_tearing_set: bool,
+        y: &mut [f64],
+    ) -> Result<SolveStatus, Singular> {
+        self.calls += 1;
+        if self.failing {
+            return Err(Singular);
+        }
+        TotalPivot.solve(system, casual_tearing_set, y)
+    }
+}
+
+#[test]
+/// The linear solver solves the steps of Newton's method after the first,
+/// the first is solved with total pivoting in the check of the start point
+fn linear_solver_test() {
+    let mut model = ClosureModel::new(2, 2, |x: &[f64], f: &mut [f64]| {
+        f[0] = x[0] * x[0] + x[1] - 3.0;
+        f[1] = x[0] * x[1] - 2.0;
+        Ok(())
+    });
+    let mut linear_solver = CountingSolver::default();
+    let mut solver = solver(2);
+    let mut x = [1.5, 1.5];
+
+    let result = solver.solve_with(
+        &mut model,
+        &mut NoObserver,
+        &mut NoFallback,
+        &mut linear_solver,
+        &mut x,
+    );
+
+    assert!(matches!(result, Ok(Solved::Newton)), "got {result:?}");
+    assert!(
+        (x[0] - 1.0).abs() < 1e-6 && (x[1] - 2.0).abs() < 1e-6,
+        "{x:?}"
+    );
+    let iterations = solver.statistics().newton_iterations;
+    assert!(iterations > 1, "{iterations} iterations");
+    assert_eq!(linear_solver.calls, iterations - 1);
+}
+
+#[test]
+/// A linear solver that fails fails Newton's method, so the fallback solves
+fn failing_linear_solver_test() {
+    let mut linear_solver = CountingSolver {
+        failing: true,
+        ..CountingSolver::default()
+    };
+    let mut fallback = |x: &mut [f64]| {
+        x[0] = CUBIC_ROOT;
+        true
+    };
+    let mut x = [-1.5];
+
+    let result = solver(1).solve_with(
+        &mut cubic_model(),
+        &mut NoObserver,
+        &mut fallback,
+        &mut linear_solver,
+        &mut x,
+    );
+
+    assert!(matches!(result, Ok(Solved::Fallback)), "got {result:?}");
+    assert_eq!(linear_solver.calls, 1, "after the first step");
 }
 
 #[test]
@@ -359,7 +458,13 @@ fn fallback_casual_tearing_set_test() {
     };
     let mut x = [0.0];
 
-    let result = solver(1).solve_with(&mut model, &mut NoObserver, &mut fallback, &mut x);
+    let result = solver(1).solve_with(
+        &mut model,
+        &mut NoObserver,
+        &mut fallback,
+        &mut TotalPivot,
+        &mut x,
+    );
 
     assert!(
         matches!(result, Err(HomotopyError::NotSolved)),

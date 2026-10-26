@@ -32,7 +32,7 @@ use crate::settings::Settings;
 use crate::{FixpointHomotopy, NewtonHomotopy};
 use log::debug;
 use newton::settings::Settings as NewtonSettings;
-use newton::{NewtonError, NewtonWorkspace};
+use newton::{LinearSolver, NewtonError, NewtonWorkspace, TotalPivot};
 use nls_model::scaling::{self, scaled_squared_error, squared_error};
 use nls_model::{EvalError, ModelFunctions};
 
@@ -227,8 +227,9 @@ impl HomotopySolver {
     /// A casual tearing set gives up after the first failure. `x` holds the
     /// solution on success and is unchanged otherwise. From `solveHomotopy`,
     /// without the handling of mixed systems, which belongs to the C
-    /// interface. [`HomotopySolver::solve_with`] adds the hybrd fallback of the
-    /// C runtime.
+    /// interface. All linear systems are solved with total pivoting.
+    /// [`HomotopySolver::solve_with`] adds the hybrd fallback and the linear
+    /// solver of the C runtime.
     ///
     /// # Errors
     ///
@@ -243,12 +244,13 @@ impl HomotopySolver {
         model: &mut M,
         x: &mut [f64],
     ) -> Result<Solved, HomotopyError> {
-        self.solve_with(model, &mut NoObserver, &mut NoFallback, x)
+        self.solve_with(model, &mut NoObserver, &mut NoFallback, &mut TotalPivot, x)
     }
 
     /// [`HomotopySolver::solve`], reporting the events of the homotopy paths
-    /// to `observer` and trying `fallback` whenever Newton's method fails,
-    /// except for a casual tearing set.
+    /// to `observer`, trying `fallback` whenever Newton's method fails, except
+    /// for a casual tearing set, and solving the linear systems of Newton's
+    /// method after its first step with `linear_solver`.
     ///
     /// # Errors
     ///
@@ -262,6 +264,7 @@ impl HomotopySolver {
         model: &mut M,
         observer: &mut impl PathObserver,
         fallback: &mut impl Fallback,
+        linear_solver: &mut impl LinearSolver,
         x: &mut [f64],
     ) -> Result<Solved, HomotopyError> {
         let n = self.x_start.len();
@@ -275,7 +278,7 @@ impl HomotopySolver {
         self.newton.set_x_scaling(&self.x_scaling[..n]);
         self.statistics = Statistics::default();
 
-        let result = self.solve_from_start(model, observer, fallback, x);
+        let result = self.solve_from_start(model, observer, fallback, linear_solver, x);
         match &result {
             Ok(solved) => debug!(target: "NLS", "Solved with {solved:?}"),
             Err(error) => {
@@ -377,6 +380,7 @@ impl HomotopySolver {
         model: &mut M,
         observer: &mut impl PathObserver,
         fallback: &mut impl Fallback,
+        linear_solver: &mut impl LinearSolver,
         x: &mut [f64],
     ) -> Result<Solved, HomotopyError> {
         let casual_tearing_set = model.info().casual_tearing_set;
@@ -387,7 +391,7 @@ impl HomotopySolver {
         }
 
         let prepared = matches!(start, Start::Ready);
-        match self.newton_then_fallback(model, fallback, prepared, x) {
+        match self.newton_then_fallback(model, fallback, linear_solver, prepared, x) {
             Some(Solver::Newton) => return Ok(Solved::Newton),
             Some(Solver::Fallback) => return Ok(Solved::Fallback),
             None => {}
@@ -410,7 +414,7 @@ impl HomotopySolver {
             newton::evaluate(model, x, &mut self.newton).map_err(|_| HomotopyError::NotSolved)?;
             newton::prepare_step(model, x, false, &mut self.newton)
                 .map_err(|_| HomotopyError::NotSolved)?;
-            match self.newton_then_fallback(model, fallback, true, x) {
+            match self.newton_then_fallback(model, fallback, linear_solver, true, x) {
                 Some(Solver::Newton) => {
                     self.statistics.path_steps = steps;
                     return Ok(Solved::Homotopy(run));
@@ -482,11 +486,12 @@ impl HomotopySolver {
         &mut self,
         model: &mut M,
         fallback: &mut impl Fallback,
+        linear_solver: &mut impl LinearSolver,
         prepared: bool,
         x: &mut [f64],
     ) -> Option<Solver> {
         self.x_newton.copy_from_slice(x);
-        if prepared && self.newton(model, x) {
+        if prepared && self.newton(model, linear_solver, x) {
             return Some(Solver::Newton);
         }
         if model.info().casual_tearing_set {
@@ -502,8 +507,19 @@ impl HomotopySolver {
 
     /// Newton's method from `x`, with the step prepared at `x`. Keeps its
     /// residual scaling on success.
-    fn newton<M: ModelFunctions>(&mut self, model: &mut M, x: &mut [f64]) -> bool {
-        let result = newton::solve_prepared(model, x, &self.newton_settings, &mut self.newton);
+    fn newton<M: ModelFunctions>(
+        &mut self,
+        model: &mut M,
+        linear_solver: &mut impl LinearSolver,
+        x: &mut [f64],
+    ) -> bool {
+        let result = newton::solve_prepared(
+            model,
+            x,
+            &self.newton_settings,
+            linear_solver,
+            &mut self.newton,
+        );
         self.statistics.newton_iterations += self.newton.iterations();
         match result {
             Ok(_) => {

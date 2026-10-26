@@ -28,8 +28,9 @@
 //! A system described by C callbacks, as a model of the solvers.
 
 use crate::observer::HomObserver;
-use faer::MatMut;
+use faer::{Mat, MatMut};
 use homotopy_core::Fallback;
+use newton::{LinearSolver, Singular, SolveStatus, TotalPivot};
 use nls_model::{EvalError, ModelFunctions, SystemInfo, forward_differences};
 use std::ffi::{c_int, c_void};
 
@@ -69,6 +70,24 @@ pub type HomJacobian = Option<
 /// set, and before the next homotopy. Must return like [`HomResidual`].
 pub type HomFallback = Option<unsafe extern "C" fn(user: *mut c_void, x: *mut f64) -> c_int>;
 
+/// Solve the linear system `matrix·y = rhs` of a step of Newton's method
+/// after the first, for example with `dgesv` of LAPACK.
+///
+/// `matrix` is the scaled Jacobian, a column-major `n×n` matrix that may be
+/// overwritten. `rhs` holds the scaled residual and receives the solution
+/// `y`. `determinant` receives the determinant of `matrix`, which decides
+/// whether the system of a casual tearing set is singular. Returns 0 if
+/// solved, nonzero if not. Must return like [`HomResidual`].
+pub type HomLinearSolver = Option<
+    unsafe extern "C" fn(
+        user: *mut c_void,
+        n: usize,
+        matrix: *mut f64,
+        rhs: *mut f64,
+        determinant: *mut f64,
+    ) -> c_int,
+>;
+
 /// A nonlinear system `F(x) = 0` of a C host.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -98,6 +117,9 @@ pub struct HomModel {
     pub observer: *const HomObserver,
     /// Solves the system when Newton's method fails, or `NULL`
     pub fallback: HomFallback,
+    /// Solves the linear systems of Newton's method after its first step, or
+    /// `NULL` for total pivoting, which solves the first step
+    pub linear_solver: HomLinearSolver,
 }
 
 /// The fallback of a [`HomModel`] as a fallback of the solver.
@@ -123,6 +145,79 @@ impl Fallback for CFallback {
         assert_eq!(x.len(), model.info().num_unknowns);
         // SAFETY: `x` has the size of the model
         unsafe { callback(self.user, x.as_mut_ptr()) != 0 }
+    }
+}
+
+/// The linear solver of a [`HomModel`] as a linear solver of Newton's method.
+pub(crate) struct CLinearSolver<'b> {
+    callback: HomLinearSolver,
+    user: *mut c_void,
+    /// Column-major `n×n` buffer of the matrix the callback gets
+    matrix: &'b mut [f64],
+}
+
+impl<'b> CLinearSolver<'b> {
+    /// The linear solver of `model`, with `matrix` as buffer for `n×n` values.
+    pub(crate) fn new(model: &HomModel, matrix: &'b mut [f64]) -> Self {
+        CLinearSolver {
+            callback: model.linear_solver,
+            user: model.user,
+            matrix,
+        }
+    }
+}
+
+impl LinearSolver for CLinearSolver<'_> {
+    /// Solves with the callback like `linearSolverWrapper` with LAPACK:
+    /// the callback solves `J·y = f`, `y` is negated afterwards. Without a
+    /// callback with [`TotalPivot`].
+    fn solve(
+        &mut self,
+        system: &mut Mat<f64>,
+        casual_tearing_set: bool,
+        y: &mut [f64],
+    ) -> Result<SolveStatus, Singular> {
+        let Some(callback) = self.callback else {
+            return TotalPivot.solve(system, casual_tearing_set, y);
+        };
+        let n = y.len();
+        assert_eq!((system.nrows(), system.ncols()), (n, n + 1));
+        assert_eq!(self.matrix.len(), n * n, "Buffer has wrong size");
+
+        for (j, column) in system.col_iter().take(n).enumerate() {
+            for (entry, value) in self.matrix[j * n..(j + 1) * n]
+                .iter_mut()
+                .zip(column.iter())
+            {
+                *entry = *value;
+            }
+        }
+        for (y, f) in y.iter_mut().zip(system.col(n).iter()) {
+            *y = *f;
+        }
+
+        let mut determinant = 0.0;
+        // SAFETY: the buffers have the sizes the callback expects
+        let status = unsafe {
+            callback(
+                self.user,
+                n,
+                self.matrix.as_mut_ptr(),
+                y.as_mut_ptr(),
+                &mut determinant,
+            )
+        };
+        if status != 0 {
+            return Err(Singular);
+        }
+        // Like in `linearSolverWrapper`, this solution isn't negated
+        if determinant.abs() < 1e-9 && casual_tearing_set {
+            return Ok(SolveStatus::SolvedDeterminantZero);
+        }
+        for y in y.iter_mut() {
+            *y = -*y;
+        }
+        Ok(SolveStatus::Solved)
     }
 }
 

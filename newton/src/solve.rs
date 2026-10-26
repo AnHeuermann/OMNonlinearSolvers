@@ -28,13 +28,14 @@
 //! The Newton-Raphson algorithm, its workspace and its results.
 
 use crate::line_search::{LineSearchError, Start, line_search};
+use crate::linear_solver::{LinearSolver, Singular, TotalPivot};
 use crate::settings::Settings;
 use crate::tracker::{Decision, Step, Tracker};
 use faer::{ColRef, Mat};
 use log::trace;
 use nls_model::scaling::{self, scaled_squared_error, squared_error};
 use nls_model::{EvalError, ModelFunctions};
-use total_pivot_solver::{SolveError, SolveStatus};
+use total_pivot_solver::SolveStatus;
 
 /// Buffers of the Newton-Raphson algorithm.
 ///
@@ -48,6 +49,8 @@ pub struct NewtonWorkspace {
     /// `num_unknowns + 1` columns. The total pivot solver solves it as
     /// `J·dy + f = 0`, so the last column holds `f` itself.
     jacobian: Mat<f64>,
+    /// Newton step of the scaled system, solution of `J(x)·diag(s)·y = −f`
+    y: Box<[f64]>,
     /// Newton step, solution of `J(x)·dy = −f`
     dy: Box<[f64]>,
     /// Trial point `x + λ·dy`, candidate for next iteration
@@ -71,6 +74,7 @@ impl NewtonWorkspace {
         NewtonWorkspace {
             f: vec![0.0; num_residuals].into_boxed_slice(),
             jacobian: Mat::zeros(num_residuals, num_unknowns + 1),
+            y: vec![0.0; num_unknowns].into_boxed_slice(),
             dy: vec![0.0; num_unknowns].into_boxed_slice(),
             x1: vec![0.0; num_unknowns].into_boxed_slice(),
 
@@ -141,9 +145,9 @@ impl From<EvalError> for NewtonError {
     }
 }
 
-/// A linear system the total pivot solver can't solve is singular
-impl From<SolveError> for NewtonError {
-    fn from(_: SolveError) -> Self {
+/// A linear system that can't be solved is singular
+impl From<Singular> for NewtonError {
+    fn from(_: Singular) -> Self {
         NewtonError::Singular
     }
 }
@@ -179,7 +183,8 @@ impl From<LineSearchError> for NewtonError {
 /// start point, the residuals with the row sums of the Jacobian. It is
 /// [`evaluate`], [`prepare_step`] and [`solve_prepared`] in a row. From
 /// `newtonAlgorithm` of the C runtime, together with the setup in
-/// `solveHomotopy` before it.
+/// `solveHomotopy` before it. All linear systems are solved with
+/// [`TotalPivot`].
 ///
 /// # Errors
 ///
@@ -204,7 +209,7 @@ pub fn solve<M: ModelFunctions>(
     work.iterations = 0;
     evaluate(model, x, work)?;
     prepare_step(model, x, true, work)?;
-    solve_prepared(model, x, settings, work)
+    solve_prepared(model, x, settings, &mut TotalPivot, work)
 }
 
 /// Evaluate `F(x)` into `work`, see [`NewtonWorkspace::f`].
@@ -225,9 +230,9 @@ pub fn evaluate<M: ModelFunctions>(
 ///
 /// Evaluates the Jacobian with its columns scaled by the variable scaling of
 /// `work`, computes the residual scaling and solves the linear system for the
-/// step. With `make_finite`, non-finite factors of the residual scaling
-/// become 1, as `solveHomotopy` does at the start point. Like there, a
-/// vanishing determinant of this system is ignored.
+/// step with [`TotalPivot`]. With `make_finite`, non-finite factors of the
+/// residual scaling become 1, as `solveHomotopy` does at the start point.
+/// Like there, a vanishing determinant of this system is ignored.
 ///
 /// # Errors
 ///
@@ -243,15 +248,16 @@ pub fn prepare_step<M: ModelFunctions>(
     if make_finite {
         scaling::make_finite(&mut work.res_scaling);
     }
-    solve_step(model.info().casual_tearing_set, work)?;
+    solve_step(&mut TotalPivot, model.info().casual_tearing_set, work)?;
     Ok(())
 }
 
 /// Solve `F(x) = 0` from `x`, starting with the step [`prepare_step`] left in
 /// `work` for `x`.
 ///
-/// Like [`solve`] after its setup. The caller sets the variable scaling, see
-/// [`NewtonWorkspace::set_x_scaling`].
+/// Like [`solve`] after its setup, with the linear systems of the later
+/// iterations solved by `linear_solver`. The caller sets the variable
+/// scaling, see [`NewtonWorkspace::set_x_scaling`].
 ///
 /// # Errors
 ///
@@ -264,6 +270,7 @@ pub fn solve_prepared<M: ModelFunctions>(
     model: &mut M,
     x: &mut [f64],
     settings: &Settings,
+    linear_solver: &mut impl LinearSolver,
     work: &mut NewtonWorkspace,
 ) -> Result<NewtonStatus, NewtonError> {
     let n = model.info().num_unknowns;
@@ -332,22 +339,22 @@ pub fn solve_prepared<M: ModelFunctions>(
 
         x.copy_from_slice(&work.x1);
         refresh_jacobian(model, x, work)?;
-        determinant_zero = solve_step(casual_tearing_set, work)?;
+        determinant_zero = solve_step(linear_solver, casual_tearing_set, work)?;
     }
     unreachable!("the tracker stops after the maximum number of iterations")
 }
 
-/// Solve the scaled linear system `[J | f]` of `work` for the Newton step
-/// `dy`, scaled back to the unknowns. Returns whether the determinant of a
-/// casual tearing set vanishes.
-fn solve_step(casual_tearing_set: bool, work: &mut NewtonWorkspace) -> Result<bool, SolveError> {
-    let n = work.dy.len();
-    let solution = total_pivot_solver::solve(&mut work.jacobian, Some(n), casual_tearing_set)?;
-    scaling::unscale(&solution.x[..n], &work.x_scaling, &mut work.dy);
-    Ok(matches!(
-        solution.status,
-        SolveStatus::SolvedDeterminantZero
-    ))
+/// Solve the scaled linear system `[J | f]` of `work` with `linear_solver`
+/// for the Newton step `dy`, scaled back to the unknowns. Returns whether the
+/// determinant of a casual tearing set vanishes.
+fn solve_step(
+    linear_solver: &mut impl LinearSolver,
+    casual_tearing_set: bool,
+    work: &mut NewtonWorkspace,
+) -> Result<bool, Singular> {
+    let status = linear_solver.solve(&mut work.jacobian, casual_tearing_set, &mut work.y)?;
+    scaling::unscale(&work.y, &work.x_scaling, &mut work.dy);
+    Ok(matches!(status, SolveStatus::SolvedDeterminantZero))
 }
 
 /// Set up the linear system `[J | f]` of the next Newton step at `x`.
@@ -393,6 +400,7 @@ mod newton_workspace_tests {
         let work = NewtonWorkspace::new(num_unknowns, num_residuals);
 
         assert_eq!(*work.f, [0.0; 2], "f: one entry per residual");
+        assert_eq!(*work.y, [0.0; 3], "y: one entry per unknown");
         assert_eq!(*work.dy, [0.0; 3], "dy: one entry per unknown");
         assert_eq!(*work.x1, [0.0; 3], "x1: one entry per unknown");
         assert_eq!(

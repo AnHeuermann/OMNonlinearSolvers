@@ -25,6 +25,8 @@
  *
  */
 
+/// The linear solver of the Newton steps
+mod linear_solver;
 /// Settings of the Newton-Raphson algorithm
 pub mod settings;
 /// Solve with Newton-Raphson algorithm
@@ -34,6 +36,8 @@ mod error_history;
 mod line_search;
 mod tracker;
 
+pub use linear_solver::{LinearSolver, Singular, TotalPivot};
 pub use solve::{
     NewtonError, NewtonStatus, NewtonWorkspace, evaluate, prepare_step, solve, solve_prepared,
 };
+pub use total_pivot_solver::SolveStatus;
