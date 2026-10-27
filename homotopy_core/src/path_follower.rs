@@ -32,11 +32,9 @@ use crate::corrector::{Correction, CorrectorError, CorrectorWorkspace, corrector
 use crate::predictor::{PredictorError, limit_to_end, predictor};
 use crate::settings::Settings;
 use crate::step_control::{Control, Outcome, StepFailure, bend, control};
-use crate::tangent::{TangentError, orient, tangent};
-use faer::Mat;
+use crate::tangent::{TangentError, TangentWorkspace, orient, tangent};
 use log::trace;
 use nls_model::{EvalError, ModelFunctions};
-use total_pivot_solver::Workspace;
 
 /// The direction the path starts in from `λ = 0`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -210,8 +208,7 @@ fn follow(
     let mut previous = vec![0.0; m];
     previous[n] = direction.sign();
     let mut h = vec![0.0; n];
-    let mut jacobian = Mat::zeros(n, m);
-    let mut pivot = Workspace::new(n);
+    let mut tangent_work = TangentWorkspace::new(n);
     let mut work = CorrectorWorkspace::new(x_scaling);
 
     observer.path_started(direction, &y0);
@@ -234,15 +231,7 @@ fn follow(
         }
 
         if tries == 0 {
-            fixed = tangent(
-                homotopy,
-                &y0,
-                &h,
-                x_scaling,
-                &mut jacobian,
-                &mut pivot,
-                &mut t,
-            )?;
+            fixed = tangent(homotopy, &y0, &h, x_scaling, &mut tangent_work, &mut t)?;
             let first_step = steps == 0;
             orient(
                 &mut t,

@@ -33,7 +33,7 @@
 //! columns of the Jacobian are scaled by `ModelFunctions::derivative`
 //! itself.
 
-use faer::reborrow::{Reborrow, ReborrowMut};
+use faer::reborrow::Reborrow;
 use faer::{MatMut, MatRef};
 use log::trace;
 
@@ -89,24 +89,41 @@ pub fn residuals(matrix: MatRef<'_, f64>, factor: &mut [f64]) {
 /// first `n` columns only, but the whole row, including the right-hand side,
 /// is divided by it. So the scaled system has the same solution, and its rows
 /// have entries of comparable size, which improves the pivot search. A row
-/// whose `J` part is zero is left unchanged. From `scaleMatrixRows`.
+/// whose `J` part is zero is left unchanged. `maxima` is a buffer for the
+/// maxima, one per row.
+///
+/// From `scaleMatrixRows`, column after column like there: a NaN is no
+/// maximum, and every entry is divided, not multiplied by the reciprocal,
+/// which would round differently.
 ///
 /// # Panics
 ///
-/// Panics if `matrix` is not `n×(n+1)`.
-pub fn rows(mut matrix: MatMut<'_, f64>) {
+/// Panics if `matrix` is not `n×(n+1)` or `maxima` doesn't have `n` entries.
+pub fn rows(matrix: MatMut<'_, f64>, maxima: &mut [f64]) {
     const DELTA: f64 = 0.0;
 
     let n = matrix.nrows();
     assert_eq!(matrix.ncols(), n + 1, "Matrix has wrong shape");
+    assert_eq!(maxima.len(), n, "Buffer has wrong length");
 
-    for row in matrix.rb_mut().row_iter_mut() {
-        let maximum = row.rb().subcols(0, n).norm_max();
-        let scale = if maximum <= DELTA { 1.0 } else { maximum };
-        // Not `row /= scale`, faer multiplies by `1/scale`, which rounds
-        // differently from the division of C
-        for entry in row.iter_mut() {
-            *entry /= scale;
+    maxima.fill(0.0);
+    for column in matrix.rb().subcols(0, n).col_iter() {
+        let column = column.try_as_col_major().unwrap().as_slice();
+        for (maximum, value) in maxima.iter_mut().zip(column) {
+            if value.abs() > *maximum {
+                *maximum = value.abs();
+            }
+        }
+    }
+    for maximum in maxima.iter_mut() {
+        if *maximum <= DELTA {
+            *maximum = 1.0;
+        }
+    }
+    for column in matrix.col_iter_mut() {
+        let column = column.try_as_col_major_mut().unwrap().as_slice_mut();
+        for (entry, maximum) in column.iter_mut().zip(maxima.iter()) {
+            *entry /= maximum;
         }
     }
 }

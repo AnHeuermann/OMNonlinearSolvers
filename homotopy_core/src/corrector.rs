@@ -72,6 +72,8 @@ pub(crate) struct CorrectorWorkspace {
     jacobian: Mat<f64>,
     /// Buffers of the total pivot solver
     pivot: Workspace,
+    /// The maxima of the row scaling
+    row_maxima: Box<[f64]>,
     /// Newton step
     dy: Box<[f64]>,
     /// Residual scaling of the latest Jacobian
@@ -87,6 +89,7 @@ impl CorrectorWorkspace {
             x_scaling: x_scaling.into(),
             jacobian: Mat::zeros(m - 1, m),
             pivot: Workspace::new(m - 1),
+            row_maxima: vec![0.0; m - 1].into(),
             dy: vec![0.0; m].into(),
             res_scaling: vec![1.0; m - 1].into(),
         }
@@ -143,7 +146,7 @@ pub(crate) fn corrector(
         work.jacobian
             .col_mut(fixed)
             .copy_from(ColRef::from_slice(h));
-        scaling::rows(work.jacobian.as_mut());
+        scaling::rows(work.jacobian.as_mut(), &mut work.row_maxima);
         let solution = total_pivot_solver::solve(
             &work.jacobian,
             Some(fixed),

@@ -73,7 +73,7 @@ fn row_scaling_test() {
         [5.0, -6.0, 7.0, -8.0]
     ];
 
-    rows(m.as_mut());
+    rows(m.as_mut(), &mut [0.0; 3]);
     assert!(m :approx_eq_eps(): mat![[0.0, 0.0, 0.0, 10.0], [1.0/4.0, 2.0/4.0, 4.0/4.0, -3.0/4.0], [5.0/7.0, -6.0/7.0, 7.0/7.0, -8.0/7.0]]);
 }
 
@@ -83,8 +83,18 @@ fn row_scaling_test() {
 fn row_scaling_divides_test() {
     let mut m = mat![[7.0, 5.0]];
 
-    rows(m.as_mut());
+    rows(m.as_mut(), &mut [0.0; 1]);
     assert!(m[(0, 1)] == 5.0 / 7.0);
+}
+
+#[test]
+/// A NaN is no maximum, like in `scaleMatrixRows`: the row is divided by the
+/// largest of the other entries of `J`
+fn row_scaling_nan_test() {
+    let mut m = mat![[f64::NAN, 2.0, 4.0], [1.0, 1.0, 1.0]];
+
+    rows(m.as_mut(), &mut [0.0; 2]);
+    assert!(m[(0, 0)].is_nan() && m[(0, 1)] == 1.0 && m[(0, 2)] == 2.0);
 }
 
 #[test]
@@ -94,7 +104,7 @@ fn row_scaling_divides_test() {
 fn row_scaling_square_matrix_test() {
     let mut m = mat![[1.0, 2.0], [3.0, 4.0]];
 
-    rows(m.as_mut());
+    rows(m.as_mut(), &mut [0.0; 2]);
 }
 
 #[test]

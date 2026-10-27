@@ -64,6 +64,8 @@ pub struct NewtonWorkspace {
     /// Residual scaling, one factor per residual, see
     /// [`nls_model::scaling::residuals`]
     res_scaling: Box<[f64]>,
+    /// The maxima of the row scaling, see [`nls_model::scaling::rows`]
+    row_maxima: Box<[f64]>,
 
     /// Iterations of the latest [`solve`]
     iterations: usize,
@@ -83,6 +85,7 @@ impl NewtonWorkspace {
             x_scaling: vec![0.0; num_unknowns].into_boxed_slice(),
             total_pivot: TotalPivot::new(num_unknowns),
             res_scaling: vec![0.0; num_residuals].into_boxed_slice(),
+            row_maxima: vec![0.0; num_residuals].into_boxed_slice(),
             iterations: 0,
         }
     }
@@ -405,7 +408,7 @@ fn refresh_jacobian<M: ModelFunctions>(
         .copy_from(ColRef::from_slice(&work.f));
 
     scaling::residuals(work.jacobian.as_ref(), &mut work.res_scaling);
-    scaling::rows(work.jacobian.as_mut());
+    scaling::rows(work.jacobian.as_mut(), &mut work.row_maxima);
     Ok(())
 }
 

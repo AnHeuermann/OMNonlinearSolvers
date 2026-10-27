@@ -52,10 +52,32 @@ impl From<SolveError> for TangentError {
     }
 }
 
+/// Buffers of [`tangent`] for a homotopy with `n` residuals and `n + 1`
+/// unknowns.
+pub(crate) struct TangentWorkspace {
+    /// The Jacobian `[∂H/∂x | ∂H/∂λ]`, `n×(n+1)`
+    jacobian: Mat<f64>,
+    /// Buffers of the total pivot solver
+    pivot: Workspace,
+    /// The maxima of the row scaling
+    row_maxima: Box<[f64]>,
+}
+
+impl TangentWorkspace {
+    /// Allocates the buffers for a homotopy with `n` residuals.
+    pub(crate) fn new(n: usize) -> Self {
+        TangentWorkspace {
+            jacobian: Mat::zeros(n, n + 1),
+            pivot: Workspace::new(n),
+            row_maxima: vec![0.0; n].into(),
+        }
+    }
+}
+
 /// Compute the tangent `t` of the path `H(y) = 0` at `y = (x, λ)`.
 ///
 /// The tangent solves `[∂H/∂x | ∂H/∂λ]·t = 0`. The `n×(n+1)` Jacobian is
-/// evaluated into `jacobian` with `h = H(y)` and its columns scaled with
+/// evaluated into `work` with `h = H(y)` and its columns scaled with
 /// `x_scaling`, then its rows are scaled with their largest entry. The total pivot solver
 /// fixes the entry of `t` it chooses to 1, and `t` is scaled back to the
 /// unknowns. It is neither normalized nor oriented, see [`orient`].
@@ -66,19 +88,18 @@ impl From<SolveError> for TangentError {
 /// # Errors
 ///
 /// Returns a [`TangentError`] if the Jacobian can't be evaluated or the linear
-/// system can't be solved. `t` and `jacobian` are unspecified then.
+/// system can't be solved. `t` is unspecified then.
 ///
 /// # Panics
 ///
-/// Panics if the sizes of `y`, `h`, `x_scaling`, `jacobian`, `pivot` and `t`
-/// don't match the homotopy.
+/// Panics if the sizes of `y`, `h`, `x_scaling`, `work` and `t` don't match
+/// the homotopy.
 pub(crate) fn tangent(
     homotopy: &mut impl ModelFunctions,
     y: &[f64],
     h: &[f64],
     x_scaling: &[f64],
-    jacobian: &mut Mat<f64>,
-    pivot: &mut Workspace,
+    work: &mut TangentWorkspace,
     t: &mut [f64],
 ) -> Result<usize, TangentError> {
     let n = homotopy.info().num_residuals;
@@ -88,11 +109,15 @@ pub(crate) fn tangent(
         "Homotopy needs λ as last unknown"
     );
 
-    homotopy.derivative(y, h, x_scaling, jacobian.as_mut())?;
-    scaling::rows(jacobian.as_mut());
+    homotopy.derivative(y, h, x_scaling, work.jacobian.as_mut())?;
+    scaling::rows(work.jacobian.as_mut(), &mut work.row_maxima);
 
-    let solution =
-        total_pivot_solver::solve(jacobian, None, homotopy.info().casual_tearing_set, pivot)?;
+    let solution = total_pivot_solver::solve(
+        &work.jacobian,
+        None,
+        homotopy.info().casual_tearing_set,
+        &mut work.pivot,
+    )?;
     scaling::unscale(solution.x, x_scaling, t);
 
     Ok(solution.fixed_column)
@@ -173,15 +198,13 @@ mod tangent_tests {
         let (n, m) = (info.num_residuals, info.num_unknowns);
         let mut h = vec![0.0; n];
         homotopy.eval(y, &mut h).unwrap();
-        let mut jacobian = Mat::zeros(n, m);
         let mut t = vec![0.0; m];
         let fixed = tangent(
             homotopy,
             y,
             &h,
             x_scaling,
-            &mut jacobian,
-            &mut Workspace::new(n),
+            &mut TangentWorkspace::new(n),
             &mut t,
         );
         (fixed, t)
@@ -276,15 +299,13 @@ mod tangent_tests {
         // The forward difference steps past x = 0.5
         let mut h = [0.0];
         model.eval(&[0.5, 0.0], &mut h).unwrap();
-        let mut jacobian = Mat::zeros(1, 2);
         let mut t = [0.0; 2];
         let result = tangent(
             &mut model,
             &[0.5, 0.0],
             &h,
             &[1.0, 1.0],
-            &mut jacobian,
-            &mut Workspace::new(1),
+            &mut TangentWorkspace::new(1),
             &mut t,
         );
 
