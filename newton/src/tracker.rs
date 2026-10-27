@@ -660,6 +660,10 @@ mod tracker_tests {
         let tracker = track(&[1.0, 2.0, 20.0]);
         assert_eq!(tracker.num_steps_hovering, 0);
         assert_eq!(tracker.hover_error, 20.0);
+        assert_eq!(
+            tracker.num_steps_without_improvement, 2,
+            "hovering and jumping are no improvement"
+        );
 
         let tracker = track(&[1.0, 2.0, 20.0, 30.0]);
         assert_eq!(tracker.num_steps_hovering, 1);
@@ -871,5 +875,117 @@ mod tracker_tests {
             "got {:?}",
             decisions[22]
         );
+    }
+
+    #[test]
+    /// The number of small steps is remembered while the error doesn't
+    /// hover, not while it hovers
+    fn small_steps_at_hover_test() {
+        let mut tracker = tracker();
+        // 1.0 sets the hover level, 2.0 and 3.0 hover around it
+        for (err, dy) in [(1.0, 1e-22), (2.0, 1.0), (3.0, 1e-22)] {
+            tracker.update(step_to(err, dy));
+        }
+
+        assert_eq!(tracker.num_small_steps, 2);
+        assert_eq!(tracker.num_small_steps_at_hover, 1);
+    }
+
+    /// The single decision after one `step` from the initial errors `err` and
+    /// `err_scaled`
+    fn decide_one_scaled(err: f64, err_scaled: f64, step: Step) -> Decision {
+        let settings = Settings::new(10).with_f_tol(F_TOL).with_x_tol(X_TOL);
+        let mut tracker = Tracker::new(&settings, err, err_scaled);
+        tracker.update(step);
+        tracker.decide(false)
+    }
+
+    /// Whether `decision` is a solution with the new or the previous iterate
+    fn is_solved(decision: &Decision, take_step: bool) -> bool {
+        matches!(decision, Decision::Converged { status: NewtonStatus::Solved, take_step: t } if *t == take_step)
+    }
+
+    #[test]
+    /// The plain or the scaled error below `f_tol²` is enough to solve, with
+    /// a step below `x_tol²`
+    fn decide_solved_one_error_test() {
+        let plain = Step {
+            err: 1e-30,
+            err_scaled: 1.0,
+            ..step_to(1e-30, 1e-30)
+        };
+        let scaled = Step {
+            err: 1.0,
+            err_scaled: 1e-30,
+            ..step_to(1e-30, 1e-30)
+        };
+
+        let decision = decide_one(2.0, plain, false);
+        assert!(is_solved(&decision, true), "plain: got {decision:?}");
+        let decision = decide_one(2.0, scaled, false);
+        assert!(is_solved(&decision, true), "scaled: got {decision:?}");
+    }
+
+    #[test]
+    /// The plain or the scaled step below `x_tol²` is enough to solve, with an
+    /// error below `f_tol²`
+    fn decide_solved_one_step_test() {
+        let plain = Step {
+            dy_scaled: 1.0,
+            ..step_to(1e-30, 1e-30)
+        };
+        let scaled = Step {
+            dy: 1.0,
+            ..step_to(1e-30, 1e-30)
+        };
+
+        let decision = decide_one(2.0, plain, false);
+        assert!(is_solved(&decision, true), "plain: got {decision:?}");
+        let decision = decide_one(2.0, scaled, false);
+        assert!(is_solved(&decision, true), "scaled: got {decision:?}");
+    }
+
+    #[test]
+    /// The error stopped decreasing and the plain or the scaled previous error
+    /// was below `f_tol²`: the previous iterate is the solution
+    fn decide_previous_one_error_was_solution_test() {
+        // Previous plain error 1e-30 and scaled 1, the step doesn't decrease
+        // the plain error and has a large scaled error and step
+        let decision = decide_one_scaled(
+            1e-30,
+            1.0,
+            Step {
+                err_scaled: 2.0,
+                ..step(2e-30)
+            },
+        );
+        assert!(is_solved(&decision, false), "plain: got {decision:?}");
+
+        // Previous plain error 1 and scaled 1e-30, the step doesn't decrease
+        // the plain error
+        let decision = decide_one_scaled(1.0, 1e-30, step(2.0));
+        assert!(is_solved(&decision, false), "scaled: got {decision:?}");
+    }
+
+    #[test]
+    /// A step is small if its plain or its scaled length is below
+    /// `x_tol²·10⁴`, more than 20 of them stop the iteration
+    fn decide_small_steps_one_length_test() {
+        for (dy, dy_scaled) in [(1e-22, 1.0), (1.0, 1e-22)] {
+            let steps: Vec<_> = (0..21)
+                .map(|k| Step {
+                    dy,
+                    dy_scaled,
+                    ..step(0.5_f64.powi(k))
+                })
+                .collect();
+            let decisions = decisions(tracker(), &steps);
+
+            assert!(
+                matches!(decisions[20], Decision::Failed(NewtonError::Stuck)),
+                "dy {dy}, scaled {dy_scaled}: got {:?}",
+                decisions[20]
+            );
+        }
     }
 }
