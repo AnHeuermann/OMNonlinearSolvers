@@ -84,6 +84,26 @@ Run the tests with coverage and open the HTML report:
 cargo llvm-cov --open
 ```
 
+## Mutation testing
+
+[cargo-mutants][cargo-mutants] changes the code in small ways, one mutant at
+a time, and checks that a test fails for each of them. Install it once and
+run it for one file or for all of them:
+
+```sh
+cargo install cargo-mutants --locked
+cargo mutants -f nls_model/src/scaling.rs
+cargo mutants --jobs 4
+```
+
+A full run takes about 20 minutes with 4 jobs. The results are in
+`mutants.out/`: `missed.txt` lists the mutants no test caught. Each mutant is
+tested with the tests of the whole workspace, mutants that can't change the
+behaviour are excluded, both configured in
+[.cargo/mutants.toml](.cargo/mutants.toml). Swaps of `<` and `<=` on floats
+are expected to be missed, they only differ for a value equal to a
+tolerance.
+
 ## Documentation
 
 Build the documentation, including private items, and open it in the browser:
@@ -149,6 +169,7 @@ coverage job prints a summary on the run's page and uploads the HTML report as
 the `coverage` artifact.
 
 [cargo-llvm-cov]: https://github.com/taiki-e/cargo-llvm-cov
+[cargo-mutants]: https://mutants.rs/
 [cbindgen]: https://github.com/mozilla/cbindgen
 [markdownlint-cli2]: https://github.com/DavidAnson/markdownlint-cli2
 [rustup]: https://rustup.rs/
