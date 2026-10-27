@@ -27,7 +27,7 @@
 
 //! Tests of the strategy that combines Newton's method and the homotopies.
 
-use faer::Mat;
+use faer::{Mat, MatMut};
 use homotopy_core::settings::Settings;
 use homotopy_core::{
     Direction, HomotopyError, HomotopyRun, HomotopySolver, NoFallback, NoObserver, PathError,
@@ -581,4 +581,196 @@ fn start_point_checked_once_test() {
 
     assert!(matches!(result, Ok(Solved::Homotopy(_))), "got {result:?}");
     assert_eq!(model.checked_after, [2]);
+}
+
+#[test]
+/// A start point is only solved if its squared error is below `f_tol²·10⁻⁴`:
+/// `F(x) = x − 3` at `x = 3 + 10⁻¹³` has the squared error `10⁻²⁶`, below
+/// `f_tol² = 10⁻²⁴` but above `10⁻²⁸`, so Newton's method takes a step
+fn start_point_factor_test() {
+    let mut model = ClosureModel::new(1, 1, |x: &[f64], f: &mut [f64]| {
+        f[0] = x[0] - 3.0;
+        Ok(())
+    });
+    let mut x = [3.0 + 1e-13];
+
+    let result = solver(1).solve(&mut model, &mut x);
+
+    assert!(matches!(result, Ok(Solved::Newton)), "got {result:?}");
+}
+
+#[test]
+/// A start point is solved if only its scaled error is small enough. For
+/// `F(x) = 10⁶·(x − 3)` from `x = 0`, the variable scaling is 1 and the
+/// residual scaling of the first solve the row sum `|J·s| = 10⁶`. From
+/// `x = 3 + 10⁻¹⁵` the squared error `10⁻¹⁸` is far above
+/// `f_tol²·10⁻⁴ = 10⁻²⁸`, the scaled one `10⁻³⁰` is below it.
+fn start_point_scaled_test() {
+    let mut model = ClosureModel::new(1, 1, |x: &[f64], f: &mut [f64]| {
+        f[0] = 1e6 * (x[0] - 3.0);
+        Ok(())
+    });
+    let mut solver = solver(1);
+    let mut x = [0.0];
+    let result = solver.solve(&mut model, &mut x);
+    assert!(matches!(result, Ok(Solved::Newton)), "got {result:?}");
+
+    let mut x = [3.0 + 1e-15];
+    let result = solver.solve(&mut model, &mut x);
+
+    assert!(matches!(result, Ok(Solved::StartPoint)), "got {result:?}");
+}
+
+#[test]
+/// A start point is solved if only its plain error is small enough. For
+/// `F(x) = 10⁻⁶·(x − 3)` the residual scaling of the first solve is `10⁻⁶`.
+/// From `x = 3 + 10⁻⁹` the squared error `10⁻³⁰` is below
+/// `f_tol²·10⁻⁴ = 10⁻²⁸`, the scaled one `10⁻¹⁸` is far above it.
+fn start_point_plain_test() {
+    let mut model = ClosureModel::new(1, 1, |x: &[f64], f: &mut [f64]| {
+        f[0] = 1e-6 * (x[0] - 3.0);
+        Ok(())
+    });
+    let mut solver = solver(1);
+    let mut x = [0.0];
+    let result = solver.solve(&mut model, &mut x);
+    assert!(matches!(result, Ok(Solved::Newton)), "got {result:?}");
+
+    let mut x = [3.0 + 1e-9];
+    let result = solver.solve(&mut model, &mut x);
+
+    assert!(matches!(result, Ok(Solved::StartPoint)), "got {result:?}");
+}
+
+/// `F(x) = (x₀ − 1, x₁² − 4)` with its analytical Jacobian, which is exactly
+/// singular where `x₁ = 0`
+struct SingularAtZero {
+    info: SystemInfo,
+}
+
+impl SingularAtZero {
+    fn new(casual_tearing_set: bool) -> Self {
+        let info = SystemInfo::new(2, 2);
+        SingularAtZero {
+            info: if casual_tearing_set {
+                info.with_casual_tearing_set()
+            } else {
+                info
+            },
+        }
+    }
+}
+
+impl ModelFunctions for SingularAtZero {
+    fn info(&self) -> &SystemInfo {
+        &self.info
+    }
+
+    fn eval(&mut self, x: &[f64], f: &mut [f64]) -> Result<(), EvalError> {
+        f[0] = x[0] - 1.0;
+        f[1] = x[1] * x[1] - 4.0;
+        Ok(())
+    }
+
+    fn derivative(
+        &mut self,
+        x: &[f64],
+        _: &[f64],
+        x_scaling: &[f64],
+        mut jacobian: MatMut<'_, f64>,
+    ) -> Result<(), EvalError> {
+        jacobian.fill(0.0);
+        jacobian[(0, 0)] = x_scaling[0];
+        jacobian[(1, 1)] = 2.0 * x[1] * x_scaling[1];
+        Ok(())
+    }
+}
+
+#[test]
+/// A start point with a singular linear system is moved like one where the
+/// model asserts, and Newton's method solves from the moved point
+fn singular_start_point_moved_test() {
+    let mut x = [0.0, 0.0];
+
+    let result = solver(2).solve(&mut SingularAtZero::new(false), &mut x);
+
+    assert!(matches!(result, Ok(Solved::Newton)), "got {result:?}");
+    assert!(
+        (x[0] - 1.0).abs() < 1e-10 && (x[1] - 2.0).abs() < 1e-10,
+        "{x:?}"
+    );
+}
+
+#[test]
+/// A casual tearing set with a singular linear system at the start point
+/// gives up without moving it
+fn singular_start_point_casual_tearing_set_test() {
+    let mut x = [0.0, 0.0];
+
+    let result = solver(2).solve(&mut SingularAtZero::new(true), &mut x);
+
+    assert!(
+        matches!(result, Err(HomotopyError::NotSolved)),
+        "got {result:?}"
+    );
+}
+
+/// `F(x) = (x₀ + x₁, x₀ + x₁ + 1)` with its analytical Jacobian, whose linear
+/// system is inconsistent at every point
+struct Inconsistent {
+    info: SystemInfo,
+}
+
+impl ModelFunctions for Inconsistent {
+    fn info(&self) -> &SystemInfo {
+        &self.info
+    }
+
+    fn eval(&mut self, x: &[f64], f: &mut [f64]) -> Result<(), EvalError> {
+        f[0] = x[0] + x[1];
+        f[1] = x[0] + x[1] + 1.0;
+        Ok(())
+    }
+
+    fn derivative(
+        &mut self,
+        _: &[f64],
+        _: &[f64],
+        x_scaling: &[f64],
+        mut jacobian: MatMut<'_, f64>,
+    ) -> Result<(), EvalError> {
+        for i in 0..2 {
+            for j in 0..2 {
+                jacobian[(i, j)] = x_scaling[j];
+            }
+        }
+        Ok(())
+    }
+}
+
+#[test]
+/// A start point whose linear system stays singular after the moves by `1%`
+/// and `10%` of the scaling is left to the fallback, without Newton's
+/// method, from the last moved start point `(0, ½·10%)`
+fn singular_start_point_fallback_test() {
+    let mut model = Inconsistent {
+        info: SystemInfo::new(2, 2),
+    };
+    let mut starts = Vec::new();
+    let mut fallback = |x: &mut [f64]| {
+        starts.push(x.to_vec());
+        true
+    };
+    let mut x = [0.0, 0.0];
+
+    let result = solver(2).solve_with(
+        &mut model,
+        &mut NoObserver,
+        &mut fallback,
+        &mut TotalPivot::new(2),
+        &mut x,
+    );
+
+    assert!(matches!(result, Ok(Solved::Fallback)), "got {result:?}");
+    assert_eq!(starts, [vec![0.0, 0.05]]);
 }
