@@ -295,7 +295,7 @@ fn follow(
 mod path_follower_tests {
     use super::*;
     use crate::NewtonHomotopy;
-    use nls_model::ClosureModel;
+    use nls_model::{ClosureModel, SystemInfo};
 
     /// Follow the Newton homotopy of the one-dimensional `f` from `x0`,
     /// reporting to `observer`
@@ -524,5 +524,60 @@ mod path_follower_tests {
             *recorder.steps_started.last().unwrap() < -1.0,
             "the try below λ = −1 is reported"
         );
+    }
+
+    /// `H(x, λ) = x² − λ` with its analytical Jacobian `(2x, −1)`
+    struct Parabola {
+        info: SystemInfo,
+    }
+
+    impl ModelFunctions for Parabola {
+        fn info(&self) -> &SystemInfo {
+            &self.info
+        }
+
+        fn eval(&mut self, y: &[f64], h: &mut [f64]) -> Result<(), EvalError> {
+            h[0] = y[0] * y[0] - y[1];
+            Ok(())
+        }
+
+        fn derivative(
+            &mut self,
+            y: &[f64],
+            _: &[f64],
+            y_scaling: &[f64],
+            mut jacobian: faer::MatMut<'_, f64>,
+        ) -> Result<(), EvalError> {
+            jacobian[(0, 0)] = 2.0 * y[0] * y_scaling[0];
+            jacobian[(0, 1)] = -y_scaling[1];
+            Ok(())
+        }
+    }
+
+    #[test]
+    /// [`Parabola`] starts at the turning point `(0, 0)`, where the tangent
+    /// `(1, 0)` is exactly orthogonal to the start direction `(0, ±1)`. On the
+    /// first step only, it is flipped for a negative start direction, so the
+    /// two directions follow the two branches to `x = 1` and `x = −1`.
+    fn turning_point_start_test() {
+        for (direction, root) in [(Direction::Positive, 1.0), (Direction::Negative, -1.0)] {
+            let mut homotopy = Parabola {
+                info: SystemInfo::new(1, 2),
+            };
+            let mut x = [0.0];
+
+            let result = follow_path(
+                &mut homotopy,
+                &[1.0, 1.0],
+                direction,
+                1e-12,
+                &Settings::new(1),
+                &mut NoObserver,
+                &mut x,
+            );
+
+            assert!(result.is_ok(), "{direction:?}: got {result:?}");
+            assert!((x[0] - root).abs() < 1e-10, "{direction:?}: got {x:?}");
+        }
     }
 }

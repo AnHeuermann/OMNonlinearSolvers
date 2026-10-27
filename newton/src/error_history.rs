@@ -252,4 +252,14 @@ mod error_history_tests {
         push_all(&mut history, &[2.0, 1.0, 2.0, 1.0]);
         assert!(!history.push(2.0 * 1.02));
     }
+
+    #[test]
+    /// The tolerance of an unchanged error is relative to the error too:
+    /// `100.5` is within 1% of the last error `100`, so it is no cycle
+    fn push_unchanged_relative_test() {
+        let mut history = ErrorHistory::new();
+
+        push_all(&mut history, &[200.0, 100.0, 200.0, 100.0]);
+        assert!(!history.push(100.5));
+    }
 }

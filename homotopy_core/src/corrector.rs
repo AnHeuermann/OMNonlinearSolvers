@@ -210,6 +210,14 @@ mod corrector_tests {
         Ok(())
     }
 
+    /// `H = c·(x² − λ)`, scaled by `c`
+    fn scaled_parabola(c: f64) -> impl FnMut(&[f64], &mut [f64]) -> Result<(), EvalError> {
+        move |y: &[f64], h: &mut [f64]| {
+            h[0] = c * (y[0] * y[0] - y[1]);
+            Ok(())
+        }
+    }
+
     /// The unit circle `H = x² + λ² − 1`
     fn circle(y: &[f64], h: &mut [f64]) -> Result<(), EvalError> {
         h[0] = y[0] * y[0] + y[1] * y[1] - 1.0;
@@ -329,5 +337,29 @@ mod corrector_tests {
         row_sums(mat![[1.0, -2.0, 3.0], [0.0, 4.0, -5.0]].as_ref(), &mut sums);
 
         assert_eq!(sums, [6.0, 9.0]);
+    }
+
+    #[test]
+    /// The plain or the scaled residual below `h_eps = 10⁻¹⁰` is enough. With
+    /// `λ = 1` fixed, Newton's method for `c·(x² − 1)` from `x = 1.1` leaves
+    /// `x² − 1 ≈ 1.1·10⁻¹⁰` after 3 steps and `≈ 2·10⁻⁵` after 2. The residual
+    /// scaling is the row sum `|c|·(2x + 1) ≈ 3|c|` of the latest Jacobian.
+    ///
+    /// * `c = 10⁶`: after 3 steps the plain residual is `1.1·10⁻⁴`, the scaled
+    ///   one `3.5·10⁻¹¹` converged.
+    /// * `c = 10⁻⁶`: after 2 steps the plain residual is `2·10⁻¹¹` converged,
+    ///   the scaled one `7·10⁻⁶`.
+    fn plain_or_scaled_residual_test() {
+        let (result, _, _) = correct(scaled_parabola(1e6), [1.1, 1.0], 1, 4);
+        assert!(
+            matches!(result, Ok(Correction::Converged)),
+            "scaled: got {result:?}"
+        );
+
+        let (result, _, _) = correct(scaled_parabola(1e-6), [1.1, 1.0], 1, 3);
+        assert!(
+            matches!(result, Ok(Correction::Converged)),
+            "plain: got {result:?}"
+        );
     }
 }
