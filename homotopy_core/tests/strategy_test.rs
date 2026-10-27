@@ -35,7 +35,7 @@ use homotopy_core::{
 };
 use newton::settings::Settings as NewtonSettings;
 use newton::{LinearSolver, Singular, SolveStatus, TotalPivot};
-use nls_model::{ClosureModel, EvalError, ModelFunctions};
+use nls_model::{ClosureModel, EvalError, ModelFunctions, SystemInfo};
 
 /// A solver with the default settings for `size` unknowns
 fn solver(size: usize) -> HomotopySolver {
@@ -503,4 +503,82 @@ fn evaluations_test() {
         near_start, 2,
         "F(x₀) and one forward difference: {points:?}"
     );
+}
+
+/// A model that records the number of its evaluations each time it is told
+/// that the start point is checked
+struct CheckedModel<M> {
+    model: M,
+    evaluations: usize,
+    checked_after: Vec<usize>,
+}
+
+impl<M> CheckedModel<M> {
+    fn new(model: M) -> Self {
+        CheckedModel {
+            model,
+            evaluations: 0,
+            checked_after: Vec::new(),
+        }
+    }
+}
+
+impl<M: ModelFunctions> ModelFunctions for CheckedModel<M> {
+    fn info(&self) -> &SystemInfo {
+        self.model.info()
+    }
+
+    fn eval(&mut self, x: &[f64], res: &mut [f64]) -> Result<(), EvalError> {
+        self.evaluations += 1;
+        self.model.eval(x, res)
+    }
+
+    fn start_point_checked(&mut self) {
+        self.checked_after.push(self.evaluations);
+    }
+}
+
+#[test]
+/// The model is told once that the start point is checked: after `F(x₀)`
+/// and the two columns of the forward differences, before Newton's method
+fn start_point_checked_test() {
+    let mut model = CheckedModel::new(ClosureModel::new(2, 2, |x: &[f64], f: &mut [f64]| {
+        f[0] = x[0] * x[0] + x[1] - 3.0;
+        f[1] = x[0] * x[1] - 2.0;
+        Ok(())
+    }));
+    let mut x = [1.5, 1.5];
+
+    let result = solver(2).solve(&mut model, &mut x);
+
+    assert!(matches!(result, Ok(Solved::Newton)), "got {result:?}");
+    assert_eq!(model.checked_after, [3]);
+}
+
+#[test]
+/// A start point that solves the system needs no check
+fn start_point_solved_not_checked_test() {
+    let mut model = CheckedModel::new(ClosureModel::new(1, 1, |x: &[f64], f: &mut [f64]| {
+        f[0] = x[0] - 3.0;
+        Ok(())
+    }));
+    let mut x = [3.0];
+
+    let result = solver(1).solve(&mut model, &mut x);
+
+    assert!(matches!(result, Ok(Solved::StartPoint)), "got {result:?}");
+    assert!(model.checked_after.is_empty());
+}
+
+#[test]
+/// The homotopies after a failed Newton's method don't check the start point
+/// again
+fn start_point_checked_once_test() {
+    let mut model = CheckedModel::new(cubic_model());
+    let mut x = [0.0];
+
+    let result = solver(1).solve(&mut model, &mut x);
+
+    assert!(matches!(result, Ok(Solved::Homotopy(_))), "got {result:?}");
+    assert_eq!(model.checked_after, [2]);
 }

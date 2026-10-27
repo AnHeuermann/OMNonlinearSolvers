@@ -17,11 +17,6 @@
   the same test systems in several crates.
 * `SystemInfo` has public members, so a caller could input wrong values. Add
   getters.
-* `total_pivot_solver::solve` allocates its solution and the permutations on
-  every call, so each Newton iteration allocates. Let it write into buffers of
-  the caller, as DESIGN.md asks.
-* Statistics of a solve, e.g. the number of iterations the C runtime adds to
-  `numberOfIterations`. Add them together with the homotopy.
 * Port corrector strategy 2 of `homotopyAlgorithm` (`homBacktraceStrategy`):
   back to the path orthogonally to the tangent, with the extended system of
   `orthogonalBacktraceMatrix`. Only strategy 1, the default, fixing one
@@ -31,6 +26,12 @@
   before adding the identity, so the path following solves with
   `λ·J·S + (1 − λ)·I` instead of `(λ·J + (1 − λ)·I)·S`. `FixpointHomotopy`
   reproduces that, see its doc comment.
+* Call `ModelFunctions::start_point_checked` after `F(x₀)` instead of after
+  the Jacobian at `x₀`, together with the C runtime. C evaluates the start
+  Jacobian of a mixed system with switching relations, so near a switching
+  point its first Newton step and its relations backup belong to another
+  branch, and the system is solved twice. The port does the same to give the
+  same results.
 * Remove the CSV export of the homotopy path later on. The OpenModelica glue
   writes it with `LOG_INIT_HOMOTOPY` like the C runtime did
   (`<model>_nonlinsys<n>_adaptive_<global|local>_homotopy_<pos|neg>.csv`), but
