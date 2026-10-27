@@ -225,6 +225,11 @@ typedef struct HomStatistics {
   // Accepted steps of the homotopy path that led to the solution, 0 without
   // a homotopy
   size_t path_steps;
+  // Jacobians evaluated by forward differences, in models without a
+  // Jacobian callback. The host counts the calls of its callback itself.
+  size_t forward_differences;
+  // Time of the forward differences in seconds
+  double forward_differences_time;
 } HomStatistics;
 
 // Messages with this level or a more severe one go to the logger: 1 error,

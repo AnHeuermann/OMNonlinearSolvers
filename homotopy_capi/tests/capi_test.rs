@@ -223,6 +223,10 @@ fn linear_solver_test() {
     );
     assert!(statistics.newton_iterations > 1);
     assert_eq!(calls, statistics.newton_iterations - 1);
+    // One Jacobian at the start point and one after each iteration but the
+    // last
+    assert_eq!(statistics.forward_differences, statistics.newton_iterations);
+    assert!(statistics.forward_differences_time > 0.0);
 }
 
 #[test]
@@ -256,11 +260,19 @@ fn jacobian_test() {
     };
     let mut x = [0.0];
 
-    let (status, _) = solve(&model, &mut x);
+    let (status, statistics) = unsafe {
+        let solver = hom_solver_new(1, null());
+        let status = hom_solve(solver, &model, x.as_mut_ptr(), null_mut());
+        let statistics = hom_solver_statistics(solver);
+        hom_solver_free(solver);
+        (status, statistics)
+    };
 
     assert_eq!(status, HomStatus::Solved);
     assert!((x[0] + 1.769_292_354_238_631).abs() < 1e-10, "{x:?}");
     assert!(calls > 0, "the Jacobian callback was used");
+    assert_eq!(statistics.forward_differences, 0);
+    assert_eq!(statistics.forward_differences_time, 0.0);
 }
 
 #[test]

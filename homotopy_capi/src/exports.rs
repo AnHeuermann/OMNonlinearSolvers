@@ -54,6 +54,11 @@ pub struct HomStatistics {
     /// Accepted steps of the homotopy path that led to the solution, 0 without
     /// a homotopy
     pub path_steps: usize,
+    /// Jacobians evaluated by forward differences, in models without a
+    /// Jacobian callback. The host counts the calls of its callback itself.
+    pub forward_differences: usize,
+    /// Time of the forward differences in seconds
+    pub forward_differences_time: f64,
 }
 
 /// Whether and how a solve ended.
@@ -305,8 +310,11 @@ pub unsafe extern "C" fn hom_solver_statistics(solver: *const HomSolver) -> HomS
         return HomStatistics::default();
     };
     let statistics = solver.solver.statistics();
+    let derivatives = solver.buffers.statistics();
     HomStatistics {
         newton_iterations: statistics.newton_iterations,
         path_steps: statistics.path_steps,
+        forward_differences: derivatives.evaluations,
+        forward_differences_time: derivatives.seconds,
     }
 }

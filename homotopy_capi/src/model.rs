@@ -33,6 +33,7 @@ use homotopy_core::Fallback;
 use newton::{LinearSolver, Singular, SolveStatus, TotalPivot};
 use nls_model::{EvalError, ModelFunctions, SystemInfo, forward_differences};
 use std::ffi::{c_int, c_void};
+use std::time::Instant;
 
 /// The callback evaluated successfully
 pub const HOM_EVAL_OK: c_int = 0;
@@ -148,6 +149,15 @@ impl Fallback for CFallback {
     }
 }
 
+/// The forward differences of a [`CModel`] in the latest solve.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct DerivativeStatistics {
+    /// Jacobians by forward differences
+    pub(crate) evaluations: usize,
+    /// Their time in seconds
+    pub(crate) seconds: f64,
+}
+
 /// The buffers of a [`CModel`] and its [`CLinearSolver`], kept by the solver
 /// between calls, so that a solve doesn't allocate.
 pub(crate) struct ModelBuffers {
@@ -161,6 +171,8 @@ pub(crate) struct ModelBuffers {
     linear_system: Box<[f64]>,
     /// Solves without a linear solver callback
     total_pivot: TotalPivot,
+    /// Of the latest solve
+    statistics: DerivativeStatistics,
 }
 
 impl ModelBuffers {
@@ -173,7 +185,13 @@ impl ModelBuffers {
             x_perturbed: vec![0.0; num_unknowns].into(),
             linear_system: vec![0.0; num_residuals * num_residuals].into(),
             total_pivot: TotalPivot::new(num_residuals),
+            statistics: DerivativeStatistics::default(),
         }
+    }
+
+    /// The forward differences of the latest wrapped model.
+    pub(crate) fn statistics(&self) -> DerivativeStatistics {
+        self.statistics
     }
 
     /// Wraps `model` as a model of the solvers and its linear solver, or
@@ -213,6 +231,7 @@ impl ModelBuffers {
         fill(&mut self.info.min, model.min, f64::NEG_INFINITY);
         fill(&mut self.info.max, model.max, f64::INFINITY);
         self.info.casual_tearing_set = model.casual_tearing_set;
+        self.statistics = DerivativeStatistics::default();
 
         let c_model = CModel {
             residual: CResidual {
@@ -222,6 +241,7 @@ impl ModelBuffers {
             },
             jacobian: &mut self.jacobian,
             x_perturbed: &mut self.x_perturbed,
+            statistics: &mut self.statistics,
         };
         let linear_solver = CLinearSolver {
             callback: model.linear_solver,
@@ -326,6 +346,8 @@ pub(crate) struct CModel<'b> {
     jacobian: &'b mut [f64],
     /// The perturbed point of the forward differences
     x_perturbed: &'b mut [f64],
+    /// Counts and times the forward differences
+    statistics: &'b mut DerivativeStatistics,
 }
 
 /// The result of a callback
@@ -357,7 +379,8 @@ impl ModelFunctions for CModel<'_> {
         jacobian: MatMut<'_, f64>,
     ) -> Result<(), EvalError> {
         let Some(callback) = self.residual.model.jacobian else {
-            return forward_differences(
+            let start = Instant::now();
+            let result = forward_differences(
                 &mut self.residual,
                 x,
                 fx,
@@ -365,6 +388,9 @@ impl ModelFunctions for CModel<'_> {
                 self.x_perturbed,
                 jacobian,
             );
+            self.statistics.evaluations += 1;
+            self.statistics.seconds += start.elapsed().as_secs_f64();
+            return result;
         };
         let info = self.residual.info;
         assert_eq!(x.len(), info.num_unknowns);
