@@ -28,7 +28,7 @@
 //! The linear solver of the Newton steps after the first.
 
 use faer::Mat;
-use total_pivot_solver::SolveStatus;
+use total_pivot_solver::{SolveStatus, Workspace};
 
 /// Solves the linear system of a Newton step after the first iteration.
 ///
@@ -64,8 +64,19 @@ pub trait LinearSolver {
 pub struct Singular;
 
 /// Gaussian elimination with complete pivoting, see
-/// [`total_pivot_solver::solve`].
-pub struct TotalPivot;
+/// [`total_pivot_solver::solve`], with its buffers.
+pub struct TotalPivot {
+    work: Workspace,
+}
+
+impl TotalPivot {
+    /// Allocates the buffers for systems with `n` unknowns.
+    pub fn new(n: usize) -> Self {
+        TotalPivot {
+            work: Workspace::new(n),
+        }
+    }
+}
 
 impl LinearSolver for TotalPivot {
     fn solve(
@@ -76,7 +87,8 @@ impl LinearSolver for TotalPivot {
     ) -> Result<SolveStatus, Singular> {
         let n = y.len();
         let solution =
-            total_pivot_solver::solve(system, Some(n), casual_tearing_set).map_err(|_| Singular)?;
+            total_pivot_solver::solve(system, Some(n), casual_tearing_set, &mut self.work)
+                .map_err(|_| Singular)?;
         y.copy_from_slice(&solution.x[..n]);
         Ok(solution.status)
     }

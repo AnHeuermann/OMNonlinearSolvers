@@ -31,7 +31,7 @@ use permuted_matrix::PermutedMatrix;
 /// Back substitution on a matrix after [`forward_elimination`].
 ///
 /// Solves the upper triangular system in logical order from the last row up
-/// and returns `x` with `n+1` entries in the original (physical) column order.
+/// and writes `x` with `n+1` entries in the original (physical) column order.
 /// The entry of the fixed column (logical column `n`) is set to 1.
 ///
 /// Rows from `rank` on have no pivot. If their right-hand side is (almost)
@@ -43,15 +43,19 @@ use permuted_matrix::PermutedMatrix;
 /// Returns [`SolveError::UnderDetermined`] if a row without pivot has a
 /// right-hand side larger than `1e-6`.
 ///
+/// # Panics
+///
+/// Panics if `x` doesn't have one entry per column of `matrix`.
+///
 /// [`forward_elimination`]: crate::forward_elimination::forward_elimination
 pub(crate) fn backward_elimination(
     matrix: &PermutedMatrix<'_, f64>,
     rank: usize,
-) -> Result<Box<[f64]>, SolveError> {
+    x: &mut [f64],
+) -> Result<(), SolveError> {
     let n_rows = matrix.nrows(); // n
-    let n_cols = matrix.ncols(); // n+1
+    assert_eq!(x.len(), matrix.ncols(), "Solution has wrong length");
 
-    let mut x: Box<[f64]> = vec![0.0; n_cols].into_boxed_slice();
     for i in (0..n_rows).rev() {
         if i >= rank {
             if matrix[(i, n_rows)].abs() > 1e-6 {
@@ -74,7 +78,7 @@ pub(crate) fn backward_elimination(
     let col_index_n = matrix.column_permutation()[n_rows];
     x[col_index_n] = 1.0;
 
-    Ok(x)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -85,7 +89,7 @@ mod backward_elimination_tests {
     use faer::utils::approx::{ApproxEq, CwiseMat};
     use faer::{Col, ColRef};
 
-    use permuted_matrix::PermutedMatrix;
+    use permuted_matrix::{Permutations, PermutedMatrix};
 
     /// Equal up to rounding errors, `128·ε` absolute and relative
     fn approx_eq_eps() -> CwiseMat<ApproxEq<f64>> {
@@ -99,9 +103,11 @@ mod backward_elimination_tests {
             [0.0, -2.0, -2.0, 8.0],
             [0.0, 0.0, 1.0, 2.0]
         ];
-        let p = PermutedMatrix::new(&mut m);
+        let mut permutations = Permutations::new(m.nrows(), m.ncols());
+        let p = PermutedMatrix::new(&mut m, &mut permutations);
 
-        let x = backward_elimination(&p, 3).unwrap();
+        let mut x = [0.0; 4];
+        backward_elimination(&p, 3, &mut x).unwrap();
 
         let residual = &m * ColRef::from_slice(&x);
         assert!(residual :approx_eq_eps(): Col::<f64>::zeros(3));
@@ -122,11 +128,13 @@ mod backward_elimination_tests {
             [0.0, -2.0, -2.0, 8.0],
             [0.0, 0.0, 0.0, 0.0]
         ];
-        let p = PermutedMatrix::new(&mut m);
+        let mut permutations = Permutations::new(m.nrows(), m.ncols());
+        let p = PermutedMatrix::new(&mut m, &mut permutations);
 
-        let x = backward_elimination(&p, 2).unwrap();
+        let mut x = [0.0; 4];
+        backward_elimination(&p, 2, &mut x).unwrap();
 
-        assert!(*x == [-3.0, 4.0, 0.0, 1.0]);
+        assert!(x == [-3.0, 4.0, 0.0, 1.0]);
 
         // x also solves the original system before the elimination
         let original = mat![
@@ -148,9 +156,10 @@ mod backward_elimination_tests {
             [0.0, -2.0, -2.0, 8.0],
             [0.0, 0.0, 0.0, 5.0]
         ];
-        let p = PermutedMatrix::new(&mut m);
+        let mut permutations = Permutations::new(m.nrows(), m.ncols());
+        let p = PermutedMatrix::new(&mut m, &mut permutations);
 
-        let result = backward_elimination(&p, 2);
+        let result = backward_elimination(&p, 2, &mut [0.0; 4]);
 
         assert!(matches!(result, Err(SolveError::UnderDetermined)));
     }

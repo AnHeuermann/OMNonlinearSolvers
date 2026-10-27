@@ -29,7 +29,7 @@
 
 use faer::Mat;
 use nls_model::{EvalError, ModelFunctions, scaling};
-use total_pivot_solver::SolveError;
+use total_pivot_solver::{SolveError, Workspace};
 
 /// Why the tangent can't be computed.
 #[derive(Debug)]
@@ -70,14 +70,15 @@ impl From<SolveError> for TangentError {
 ///
 /// # Panics
 ///
-/// Panics if the sizes of `y`, `h`, `x_scaling`, `jacobian` and `t` don't
-/// match the homotopy.
+/// Panics if the sizes of `y`, `h`, `x_scaling`, `jacobian`, `pivot` and `t`
+/// don't match the homotopy.
 pub(crate) fn tangent(
     homotopy: &mut impl ModelFunctions,
     y: &[f64],
     h: &[f64],
     x_scaling: &[f64],
     jacobian: &mut Mat<f64>,
+    pivot: &mut Workspace,
     t: &mut [f64],
 ) -> Result<usize, TangentError> {
     let n = homotopy.info().num_residuals;
@@ -90,8 +91,9 @@ pub(crate) fn tangent(
     homotopy.derivative(y, h, x_scaling, jacobian.as_mut())?;
     scaling::rows(jacobian.as_mut());
 
-    let solution = total_pivot_solver::solve(jacobian, None, homotopy.info().casual_tearing_set)?;
-    scaling::unscale(&solution.x, x_scaling, t);
+    let solution =
+        total_pivot_solver::solve(jacobian, None, homotopy.info().casual_tearing_set, pivot)?;
+    scaling::unscale(solution.x, x_scaling, t);
 
     Ok(solution.fixed_column)
 }
@@ -173,7 +175,15 @@ mod tangent_tests {
         homotopy.eval(y, &mut h).unwrap();
         let mut jacobian = Mat::zeros(n, m);
         let mut t = vec![0.0; m];
-        let fixed = tangent(homotopy, y, &h, x_scaling, &mut jacobian, &mut t);
+        let fixed = tangent(
+            homotopy,
+            y,
+            &h,
+            x_scaling,
+            &mut jacobian,
+            &mut Workspace::new(n),
+            &mut t,
+        );
         (fixed, t)
     }
 
@@ -274,6 +284,7 @@ mod tangent_tests {
             &h,
             &[1.0, 1.0],
             &mut jacobian,
+            &mut Workspace::new(1),
             &mut t,
         );
 

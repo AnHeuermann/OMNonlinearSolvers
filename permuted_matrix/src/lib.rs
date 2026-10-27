@@ -28,7 +28,8 @@
 //! A view of a [`faer::Mat`] with permuted rows and columns.
 //!
 //! [`PermutedMatrix`] swaps rows and columns by swapping entries of two index
-//! permutations, the data of the matrix never moves. Elements are accessed by
+//! permutations, the data of the matrix never moves. The permutations are a
+//! [`Permutations`] buffer of the caller, so a view doesn't allocate. Elements are accessed by
 //! their logical (permuted) position with `m[(i, j)]`, which reads or writes
 //! the physical position `(row_permutation[i], column_permutation[j])`.
 //! [`PermutedMatrix::to_mat`] creates a new matrix with the permutations
@@ -43,10 +44,11 @@
 //!
 //! ```
 //! use faer::mat;
-//! use permuted_matrix::PermutedMatrix;
+//! use permuted_matrix::{PermutedMatrix, Permutations};
 //!
 //! let mut m = mat![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
-//! let mut p = PermutedMatrix::new(&mut m);
+//! let mut permutations = Permutations::new(2, 3);
+//! let mut p = PermutedMatrix::new(&mut m, &mut permutations);
 //!
 //! p.swap_rows(0, 1);
 //! p.swap_columns(0, 2);
@@ -55,7 +57,6 @@
 //!
 //! // Writes go to the physical position
 //! p[(0, 0)] = 10.0;
-//! drop(p);
 //! assert_eq!(m, mat![[1.0, 2.0, 3.0], [4.0, 5.0, 10.0]]);
 //! ```
 
@@ -64,6 +65,37 @@ use std::iter::Iterator;
 
 use faer::Mat;
 use std::ops::{Index, IndexMut};
+
+/// The row and column permutations of a [`PermutedMatrix`], allocated once
+/// for matrices of one shape.
+#[derive(Debug)]
+pub struct Permutations {
+    /// Physical row of each logical row
+    rows: Box<[usize]>,
+    /// Physical column of each logical column
+    columns: Box<[usize]>,
+}
+
+impl Permutations {
+    /// Allocates the permutations of a matrix with `nrows` rows and `ncols`
+    /// columns.
+    pub fn new(nrows: usize, ncols: usize) -> Self {
+        Permutations {
+            rows: (0..nrows).collect(),
+            columns: (0..ncols).collect(),
+        }
+    }
+
+    /// Sets both permutations to the identity.
+    fn reset(&mut self) {
+        for (i, row) in self.rows.iter_mut().enumerate() {
+            *row = i;
+        }
+        for (j, column) in self.columns.iter_mut().enumerate() {
+            *column = j;
+        }
+    }
+}
 
 /// View of a borrowed matrix with permuted rows and columns.
 ///
@@ -75,25 +107,31 @@ use std::ops::{Index, IndexMut};
 pub struct PermutedMatrix<'a, T> {
     /// Borrowed matrix, its memory layout is never changed by the view
     matrix: &'a mut Mat<T>,
-    /// Physical row of each logical row
-    row_permutation: Box<[usize]>,
-    /// Physical column of each logical column
-    column_permutation: Box<[usize]>,
+    /// Borrowed permutations
+    permutations: &'a mut Permutations,
 }
 
 impl<'a, T> PermutedMatrix<'a, T> {
     /// Creates a view of `matrix` without any permutation, logical and
-    /// physical positions are the same.
+    /// physical positions are the same. `permutations` is reset and holds the
+    /// permutations of the view.
     ///
     /// The matrix stays borrowed while the view exists. Writes through the
     /// view change `matrix`, the data is never copied.
-    pub fn new(matrix: &'a mut Mat<T>) -> Self {
-        let nrows = matrix.nrows();
-        let ncols = matrix.ncols();
+    ///
+    /// # Panics
+    ///
+    /// Panics if `permutations` doesn't have the shape of `matrix`.
+    pub fn new(matrix: &'a mut Mat<T>, permutations: &'a mut Permutations) -> Self {
+        assert_eq!(
+            (permutations.rows.len(), permutations.columns.len()),
+            (matrix.nrows(), matrix.ncols()),
+            "Permutations have the wrong shape"
+        );
+        permutations.reset();
         PermutedMatrix {
             matrix,
-            row_permutation: (0..nrows).collect(),
-            column_permutation: (0..ncols).collect(),
+            permutations,
         }
     }
 
@@ -111,7 +149,7 @@ impl<'a, T> PermutedMatrix<'a, T> {
     ///
     /// Entry `i` is the physical row of logical row `i`.
     pub fn row_permutation(&self) -> &[usize] {
-        &self.row_permutation
+        &self.permutations.rows
     }
 
     /// Returns the column permutation.
@@ -120,7 +158,7 @@ impl<'a, T> PermutedMatrix<'a, T> {
     /// results computed in logical order back to the original columns, for
     /// example the entries of a solution vector.
     pub fn column_permutation(&self) -> &[usize] {
-        &self.column_permutation
+        &self.permutations.columns
     }
 
     /// Returns an iterator over the logical diagonal, the elements at
@@ -176,7 +214,7 @@ impl<'a, T> PermutedMatrix<'a, T> {
     ///
     /// Panics if `a` or `b` is not smaller than [`Self::nrows`].
     pub fn swap_rows(&mut self, a: usize, b: usize) {
-        self.row_permutation.swap(a, b);
+        self.permutations.rows.swap(a, b);
     }
 
     /// Swaps logical columns `a` and `b`.
@@ -188,7 +226,7 @@ impl<'a, T> PermutedMatrix<'a, T> {
     ///
     /// Panics if `a` or `b` is not smaller than [`Self::ncols`].
     pub fn swap_columns(&mut self, a: usize, b: usize) {
-        self.column_permutation.swap(a, b);
+        self.permutations.columns.swap(a, b);
     }
 
     /// Write the logical (permuted) matrix to `f`, formatting each element
@@ -233,7 +271,7 @@ impl<'a, T> Index<(usize, usize)> for PermutedMatrix<'a, T> {
     type Output = T;
 
     fn index(&self, (i, j): (usize, usize)) -> &Self::Output {
-        &self.matrix[(self.row_permutation[i], self.column_permutation[j])]
+        &self.matrix[(self.permutations.rows[i], self.permutations.columns[j])]
     }
 }
 
@@ -245,7 +283,7 @@ impl<'a, T> Index<(usize, usize)> for PermutedMatrix<'a, T> {
 /// Panics if `i` or `j` is out of bounds.
 impl<'a, T> IndexMut<(usize, usize)> for PermutedMatrix<'a, T> {
     fn index_mut(&mut self, (i, j): (usize, usize)) -> &mut Self::Output {
-        &mut self.matrix[(self.row_permutation[i], self.column_permutation[j])]
+        &mut self.matrix[(self.permutations.rows[i], self.permutations.columns[j])]
     }
 }
 

@@ -280,7 +280,7 @@ fn observer_test() {
         &mut model,
         &mut counter,
         &mut NoFallback,
-        &mut TotalPivot,
+        &mut TotalPivot::new(1),
         &mut x,
     );
 
@@ -326,7 +326,7 @@ fn fallback_test() {
         &mut cubic_model(),
         &mut counter,
         &mut fallback,
-        &mut TotalPivot,
+        &mut TotalPivot::new(1),
         &mut x,
     );
 
@@ -351,7 +351,7 @@ fn failing_fallback_test() {
         &mut cubic_model(),
         &mut NoObserver,
         &mut fallback,
-        &mut TotalPivot,
+        &mut TotalPivot::new(1),
         &mut x,
     );
 
@@ -365,10 +365,21 @@ fn failing_fallback_test() {
 
 /// A [`LinearSolver`] that counts its calls, solving with total pivoting
 /// unless it is `failing`
-#[derive(Default)]
 struct CountingSolver {
     calls: usize,
     failing: bool,
+    total_pivot: TotalPivot,
+}
+
+impl CountingSolver {
+    /// A solver for `n` unknowns
+    fn new(n: usize, failing: bool) -> Self {
+        CountingSolver {
+            calls: 0,
+            failing,
+            total_pivot: TotalPivot::new(n),
+        }
+    }
 }
 
 impl LinearSolver for CountingSolver {
@@ -382,7 +393,7 @@ impl LinearSolver for CountingSolver {
         if self.failing {
             return Err(Singular);
         }
-        TotalPivot.solve(system, casual_tearing_set, y)
+        self.total_pivot.solve(system, casual_tearing_set, y)
     }
 }
 
@@ -395,7 +406,7 @@ fn linear_solver_test() {
         f[1] = x[0] * x[1] - 2.0;
         Ok(())
     });
-    let mut linear_solver = CountingSolver::default();
+    let mut linear_solver = CountingSolver::new(2, false);
     let mut solver = solver(2);
     let mut x = [1.5, 1.5];
 
@@ -420,10 +431,7 @@ fn linear_solver_test() {
 #[test]
 /// A linear solver that fails fails Newton's method, so the fallback solves
 fn failing_linear_solver_test() {
-    let mut linear_solver = CountingSolver {
-        failing: true,
-        ..CountingSolver::default()
-    };
+    let mut linear_solver = CountingSolver::new(1, true);
     let mut fallback = |x: &mut [f64]| {
         x[0] = CUBIC_ROOT;
         true
@@ -462,7 +470,7 @@ fn fallback_casual_tearing_set_test() {
         &mut model,
         &mut NoObserver,
         &mut fallback,
-        &mut TotalPivot,
+        &mut TotalPivot::new(1),
         &mut x,
     );
 

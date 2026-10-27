@@ -84,7 +84,7 @@ mod forward_elimination_tests {
     use faer::mat;
     use faer::utils::approx::{ApproxEq, CwiseMat};
 
-    use permuted_matrix::PermutedMatrix;
+    use permuted_matrix::{Permutations, PermutedMatrix};
 
     /// Equal up to rounding errors, `128·ε` absolute and relative
     fn approx_eq_eps() -> CwiseMat<ApproxEq<f64>> {
@@ -99,7 +99,8 @@ mod forward_elimination_tests {
             [1.0, 1.0, -1.0, -1.0],
             [3.0, 11.0, 5.0, -35.0]
         ];
-        let mut p = PermutedMatrix::new(&mut m);
+        let mut permutations = Permutations::new(m.nrows(), m.ncols());
+        let mut p = PermutedMatrix::new(&mut m, &mut permutations);
 
         // Step 0: subtract 1·row 0 from row 1 and 3·row 0 from row 2
         let expected_result = mat![
@@ -153,7 +154,8 @@ mod forward_elimination_tests {
             [0.0, 1.0, 4.0, -14.0]
         ];
         let n_pivot_columns = m.ncols();
-        let mut p = PermutedMatrix::new(&mut m);
+        let mut permutations = Permutations::new(m.nrows(), m.ncols());
+        let mut p = PermutedMatrix::new(&mut m, &mut permutations);
 
         let rank = forward_elimination(&mut p, n_pivot_columns);
 

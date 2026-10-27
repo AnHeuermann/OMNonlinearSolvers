@@ -244,7 +244,8 @@ impl HomotopySolver {
         model: &mut M,
         x: &mut [f64],
     ) -> Result<Solved, HomotopyError> {
-        self.solve_with(model, &mut NoObserver, &mut NoFallback, &mut TotalPivot, x)
+        let mut total_pivot = TotalPivot::new(x.len());
+        self.solve_with(model, &mut NoObserver, &mut NoFallback, &mut total_pivot, x)
     }
 
     /// [`HomotopySolver::solve`], reporting the events of the homotopy paths

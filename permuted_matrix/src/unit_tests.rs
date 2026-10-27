@@ -28,11 +28,17 @@
 use super::*;
 use faer::mat;
 
+/// Permutations for the shape of `m`
+fn permutations_of<T>(m: &Mat<T>) -> Permutations {
+    Permutations::new(m.nrows(), m.ncols())
+}
+
 #[test]
 fn identity_permutation_test() {
     let mut m = mat![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
 
-    let m_permutation = PermutedMatrix::new(&mut m);
+    let mut permutations = permutations_of(&m);
+    let m_permutation = PermutedMatrix::new(&mut m, &mut permutations);
 
     let m = m_permutation.to_mat();
     assert_eq!(m, mat![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]);
@@ -42,7 +48,8 @@ fn identity_permutation_test() {
 fn swap_rows_test() {
     let mut m = mat![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
 
-    let mut m_permutation = PermutedMatrix::new(&mut m);
+    let mut permutations = permutations_of(&m);
+    let mut m_permutation = PermutedMatrix::new(&mut m, &mut permutations);
 
     m_permutation.swap_rows(0, 1);
     let m = m_permutation.to_mat();
@@ -53,7 +60,8 @@ fn swap_rows_test() {
 fn swap_columns_test() {
     let mut m = mat![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
 
-    let mut m_permutation = PermutedMatrix::new(&mut m);
+    let mut permutations = permutations_of(&m);
+    let mut m_permutation = PermutedMatrix::new(&mut m, &mut permutations);
 
     m_permutation.swap_columns(0, 1);
     let m = m_permutation.to_mat();
@@ -73,11 +81,34 @@ fn swap_columns_test() {
 }
 
 #[test]
+/// Permutations reused for a new view start as the identity again
+fn reused_permutations_test() {
+    let mut m = mat![[1.0, 2.0], [3.0, 4.0]];
+    let mut permutations = permutations_of(&m);
+    let mut m_permutation = PermutedMatrix::new(&mut m, &mut permutations);
+    m_permutation.swap_rows(0, 1);
+    m_permutation.swap_columns(0, 1);
+    let m_permutation = PermutedMatrix::new(&mut m, &mut permutations);
+
+    assert_eq!(m_permutation.row_permutation(), &[0, 1]);
+    assert_eq!(m_permutation.column_permutation(), &[0, 1]);
+}
+
+#[test]
+#[should_panic = "Permutations have the wrong shape"]
+fn wrong_shape_permutations_test() {
+    let mut m = mat![[1.0, 2.0], [3.0, 4.0]];
+    let mut permutations = Permutations::new(2, 3);
+
+    let _ = PermutedMatrix::new(&mut m, &mut permutations);
+}
+
+#[test]
 fn mat_outliving_perm_test() {
     let mut m = mat![[1.0, 2.0], [3.0, 4.0]];
 
-    let m_permutation = PermutedMatrix::new(&mut m);
-    drop(m_permutation);
+    let mut permutations = permutations_of(&m);
+    let _ = PermutedMatrix::new(&mut m, &mut permutations);
 
     assert_eq!(m, mat![[1.0, 2.0], [3.0, 4.0]])
 }
@@ -86,7 +117,8 @@ fn mat_outliving_perm_test() {
 fn new_test() {
     let mut m = mat![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
 
-    let m_permutation = PermutedMatrix::new(&mut m);
+    let mut permutations = permutations_of(&m);
+    let m_permutation = PermutedMatrix::new(&mut m, &mut permutations);
 
     assert_eq!(m_permutation.nrows(), 2);
     assert_eq!(m_permutation.ncols(), 3);
@@ -98,7 +130,8 @@ fn new_test() {
 fn swap_rows_repeated_test() {
     let mut m = mat![[1.0], [2.0], [3.0]];
 
-    let mut m_permutation = PermutedMatrix::new(&mut m);
+    let mut permutations = permutations_of(&m);
+    let mut m_permutation = PermutedMatrix::new(&mut m, &mut permutations);
 
     // Second swap moves a row that was already moved by the first one
     m_permutation.swap_rows(0, 1);
@@ -111,7 +144,8 @@ fn swap_rows_repeated_test() {
 fn swap_same_index_test() {
     let mut m = mat![[1.0, 2.0], [3.0, 4.0]];
 
-    let mut m_permutation = PermutedMatrix::new(&mut m);
+    let mut permutations = permutations_of(&m);
+    let mut m_permutation = PermutedMatrix::new(&mut m, &mut permutations);
 
     m_permutation.swap_rows(1, 1);
     m_permutation.swap_columns(0, 0);
@@ -123,7 +157,8 @@ fn swap_same_index_test() {
 fn swap_rows_and_columns_test() {
     let mut m = mat![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
 
-    let mut m_permutation = PermutedMatrix::new(&mut m);
+    let mut permutations = permutations_of(&m);
+    let mut m_permutation = PermutedMatrix::new(&mut m, &mut permutations);
 
     m_permutation.swap_rows(0, 1);
     m_permutation.swap_columns(0, 2);
@@ -137,7 +172,8 @@ fn swap_rows_and_columns_test() {
 fn index_test() {
     let mut m = mat![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
 
-    let mut m_permutation = PermutedMatrix::new(&mut m);
+    let mut permutations = permutations_of(&m);
+    let mut m_permutation = PermutedMatrix::new(&mut m, &mut permutations);
 
     m_permutation.swap_rows(0, 1);
     m_permutation.swap_columns(1, 2);
@@ -153,13 +189,13 @@ fn index_test() {
 fn index_mut_test() {
     let mut m = mat![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
 
-    let mut m_permutation = PermutedMatrix::new(&mut m);
+    let mut permutations = permutations_of(&m);
+    let mut m_permutation = PermutedMatrix::new(&mut m, &mut permutations);
 
     m_permutation.swap_rows(0, 1);
     m_permutation.swap_columns(0, 2);
     m_permutation[(0, 0)] = 10.0;
     assert_eq!(m_permutation[(0, 0)], 10.0);
-    drop(m_permutation);
 
     // Writes go to the physical position, the memory layout is unchanged
     assert_eq!(m, mat![[1.0, 2.0, 3.0], [4.0, 5.0, 10.0]]);
@@ -168,7 +204,8 @@ fn index_mut_test() {
 #[test]
 fn diagonal_test() {
     let mut m = mat![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
-    let mut m_permutation = PermutedMatrix::new(&mut m);
+    let mut permutations = permutations_of(&m);
+    let mut m_permutation = PermutedMatrix::new(&mut m, &mut permutations);
     m_permutation.swap_columns(0, 2);
 
     let diag: Vec<f64> = m_permutation.diagonal().copied().collect();
@@ -178,7 +215,8 @@ fn diagonal_test() {
 #[test]
 fn row_test() {
     let mut m = mat![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
-    let mut m_permutation = PermutedMatrix::new(&mut m);
+    let mut permutations = permutations_of(&m);
+    let mut m_permutation = PermutedMatrix::new(&mut m, &mut permutations);
     m_permutation.swap_columns(0, 2);
     m_permutation.swap_rows(0, 1);
 
@@ -189,7 +227,8 @@ fn row_test() {
 #[test]
 fn fmt_display_test() {
     let mut m = mat![[1.5, 2.0], [1. / 3., f64::NAN], [-f64::INFINITY, 6.0]];
-    let mut m_permutation = PermutedMatrix::new(&mut m);
+    let mut permutations = permutations_of(&m);
+    let mut m_permutation = PermutedMatrix::new(&mut m, &mut permutations);
     m_permutation.swap_columns(1, 0);
     m_permutation.swap_rows(1, 2);
 
@@ -206,7 +245,8 @@ fn fmt_display_test() {
 #[test]
 fn fmt_debug_display_test() {
     let mut m = mat![[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]];
-    let m_permutation = PermutedMatrix::new(&mut m);
+    let mut permutations = permutations_of(&m);
+    let m_permutation = PermutedMatrix::new(&mut m, &mut permutations);
 
     let format = format!("{:?}", m_permutation);
     assert_eq!(
@@ -214,7 +254,7 @@ fn fmt_debug_display_test() {
         [1.0, 2.0],\n\
         [3.0, 4.0],\n\
         [5.0, 6.0],\n\
-        ], row_permutation: [0, 1, 2], column_permutation: [0, 1] }",
+        ], permutations: Permutations { rows: [0, 1, 2], columns: [0, 1] } }",
         format
     )
 }
@@ -222,13 +262,13 @@ fn fmt_debug_display_test() {
 #[test]
 fn to_mat_keeps_original_test() {
     let mut m = mat![[1.0, 2.0], [3.0, 4.0]];
-    let mut m_permutation = PermutedMatrix::new(&mut m);
+    let mut permutations = permutations_of(&m);
+    let mut m_permutation = PermutedMatrix::new(&mut m, &mut permutations);
 
     m_permutation.swap_rows(0, 1);
     let mut copy = m_permutation.to_mat();
     copy[(0, 0)] = 10.0;
     assert_eq!(m_permutation[(0, 0)], 3.0);
-    drop(m_permutation);
 
     assert_eq!(m, mat![[1.0, 2.0], [3.0, 4.0]]);
 }
@@ -237,7 +277,8 @@ fn to_mat_keeps_original_test() {
 #[should_panic]
 fn index_row_out_of_bounds_test() {
     let mut m = mat![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
-    let m_permutation = PermutedMatrix::new(&mut m);
+    let mut permutations = permutations_of(&m);
+    let m_permutation = PermutedMatrix::new(&mut m, &mut permutations);
 
     let _ = m_permutation[(2, 0)];
 }
@@ -247,7 +288,8 @@ fn index_row_out_of_bounds_test() {
 fn index_column_out_of_bounds_test() {
     let mut m = mat![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
 
-    let m_permutation = PermutedMatrix::new(&mut m);
+    let mut permutations = permutations_of(&m);
+    let m_permutation = PermutedMatrix::new(&mut m, &mut permutations);
 
     let _ = m_permutation[(0, 3)];
 }
@@ -257,7 +299,8 @@ fn index_column_out_of_bounds_test() {
 fn swap_rows_out_of_bounds_test() {
     let mut m = mat![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
 
-    let mut m_permutation = PermutedMatrix::new(&mut m);
+    let mut permutations = permutations_of(&m);
+    let mut m_permutation = PermutedMatrix::new(&mut m, &mut permutations);
 
     m_permutation.swap_rows(0, 2);
 }
@@ -267,7 +310,8 @@ fn swap_rows_out_of_bounds_test() {
 fn swap_columns_out_of_bounds_test() {
     let mut m = mat![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
 
-    let mut m_permutation = PermutedMatrix::new(&mut m);
+    let mut permutations = permutations_of(&m);
+    let mut m_permutation = PermutedMatrix::new(&mut m, &mut permutations);
 
     m_permutation.swap_columns(0, 3);
 }

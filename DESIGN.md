@@ -169,6 +169,12 @@ Buffers are allocated once and reused: workspace structs like
 `NewtonWorkspace`, output slices and matrix views as parameters. Buffers of a
 fixed size are `Box<[f64]>`, not `Vec`.
 
+A solve through the C interface doesn't allocate either: the solver keeps
+the buffers of the model, its facts and the linear systems between calls.
+Only the conveniences for Rust allocate per call, `newton::solve`,
+`HomotopySolver::solve` and the forward differences of
+`ModelFunctions::derivative`.
+
 ### Inputs first, outputs last
 
 Like the standard library, for example `Read::read(&mut self, buf)`,

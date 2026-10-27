@@ -73,9 +73,11 @@ pub trait ModelFunctions {
     /// `jacobian` is a `num_residuals × num_unknowns` view of a column-major
     /// matrix.
     ///
-    /// The default computes forward differences, one evaluation of `F` per
-    /// column, with the step `h = sqrt(20·ε)·(1 + |xⱼ|)` of the C runtime. When
-    /// `x+h` reaches maximum bound backwards differences are used instead.
+    /// The default computes [`forward_differences`], one evaluation of `F`
+    /// per column, with the step `h = sqrt(20·ε)·(1 + |xⱼ|)` of the C runtime.
+    /// When `x+h` reaches maximum bound backwards differences are used
+    /// instead. It allocates the perturbed point, models that are solved
+    /// often override this method and pass a buffer.
     ///
     /// Systems with an analytical Jacobian override it and multiply each
     /// column `j` by `x_scaling[j]`. The scaling is part of the evaluation,
@@ -97,7 +99,7 @@ pub trait ModelFunctions {
         x_scaling: &[f64],
         jacobian: MatMut<'_, f64>,
     ) -> Result<(), EvalError> {
-        forward_differences(self, x, fx, x_scaling, jacobian)
+        forward_differences(self, x, fx, x_scaling, &mut x.to_vec(), jacobian)
     }
 }
 
@@ -108,7 +110,8 @@ pub trait ModelFunctions {
 /// of the C runtime, backwards where `x + h` reaches the upper bound. `fx` is
 /// `F(x)`. Models that override `derivative` can fall back to it. Each
 /// difference is multiplied by `1/h·x_scaling[j]`, like in
-/// `getNumericalJacobianHomotopy`.
+/// `getNumericalJacobianHomotopy`. `x_perturbed` is a buffer for the
+/// perturbed points, one entry per unknown.
 ///
 /// # Errors
 ///
@@ -118,21 +121,23 @@ pub trait ModelFunctions {
 /// # Panics
 ///
 /// Panics if the shape of `jacobian` doesn't match `x` and `fx`, or
-/// `x_scaling` doesn't have one factor per unknown.
+/// `x_scaling` or `x_perturbed` don't have one entry per unknown.
 pub fn forward_differences<M: ModelFunctions + ?Sized>(
     model: &mut M,
     x: &[f64],
     fx: &[f64],
     x_scaling: &[f64],
+    x_perturbed: &mut [f64],
     jacobian: MatMut<'_, f64>,
 ) -> Result<(), EvalError> {
     assert_eq!(x.len(), jacobian.ncols());
     assert_eq!(fx.len(), jacobian.nrows());
     assert_eq!(x_scaling.len(), x.len(), "Scaling vector has wrong length");
+    assert_eq!(x_perturbed.len(), x.len(), "Buffer has wrong length");
 
     let delta = (f64::EPSILON * 20.0).sqrt();
 
-    let mut x_tilde = x.to_vec();
+    x_perturbed.copy_from_slice(x);
 
     for (j, col) in jacobian.col_iter_mut().enumerate() {
         let mut h = delta * (1.0 + x[j].abs());
@@ -142,11 +147,11 @@ pub fn forward_differences<M: ModelFunctions + ?Sized>(
             h *= -1.0;
         }
 
-        x_tilde[j] += h;
+        x_perturbed[j] += h;
 
         // col := F(x + h·eⱼ)
         let column: &mut [f64] = col.try_as_col_major_mut().unwrap().as_slice_mut();
-        model.eval(&x_tilde, column)?;
+        model.eval(x_perturbed, column)?;
 
         // col := (F(x + h·eⱼ) − F(x)) / h · sⱼ
         let factor = 1.0 / h * x_scaling[j];
@@ -154,7 +159,7 @@ pub fn forward_differences<M: ModelFunctions + ?Sized>(
             column[i] = (column[i] - fx[i]) * factor;
         }
 
-        x_tilde[j] = x[j]; // undo the perturbation
+        x_perturbed[j] = x[j]; // undo the perturbation
     }
 
     Ok(())

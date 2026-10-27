@@ -30,7 +30,7 @@
 //! Every function checks its pointers and catches panics, so neither a null
 //! pointer nor a panic reaches the host as undefined behaviour.
 
-use crate::model::{CFallback, CLinearSolver, CModel, HomModel};
+use crate::model::{CFallback, HomModel, ModelBuffers};
 use crate::observer::CObserver;
 use crate::settings::HomSettings;
 use homotopy_core::{Direction, HomotopyError, HomotopyRun, HomotopySolver, Solved};
@@ -41,8 +41,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 pub struct HomSolver {
     solver: HomotopySolver,
     size: usize,
-    /// Buffer of the matrix for the linear solver callback of a model
-    linear_system: Box<[f64]>,
+    /// Buffers of the models, kept between solves
+    buffers: ModelBuffers,
 }
 
 /// Statistics of the latest solve of a [`HomSolver`].
@@ -142,7 +142,7 @@ pub unsafe extern "C" fn hom_solver_new(
         HomSolver {
             solver: HomotopySolver::new(size, newton, homotopy),
             size,
-            linear_system: vec![0.0; size * size].into(),
+            buffers: ModelBuffers::new(size, size),
         }
     });
     match created {
@@ -196,9 +196,8 @@ pub unsafe extern "C" fn hom_solve(
     }
     let model_observer = model.observer;
     let mut fallback = CFallback::new(model);
-    let mut linear_solver = CLinearSolver::new(model, &mut solver.linear_system);
     // SAFETY: guaranteed by the caller
-    let Some(mut model) = (unsafe { CModel::new(model) }) else {
+    let Some((mut model, mut linear_solver)) = (unsafe { solver.buffers.wrap(model) }) else {
         return HomStatus::InvalidArgument;
     };
     // SAFETY: guaranteed by the caller
@@ -259,7 +258,7 @@ pub unsafe extern "C" fn hom_solve_own_homotopy(
     }
     let model_observer = model.observer;
     // SAFETY: guaranteed by the caller
-    let Some(mut model) = (unsafe { CModel::new(model) }) else {
+    let Some((mut model, _)) = (unsafe { solver.buffers.wrap(model) }) else {
         return HomStatus::InvalidArgument;
     };
     // SAFETY: guaranteed by the caller

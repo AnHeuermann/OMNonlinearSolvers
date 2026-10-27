@@ -32,7 +32,7 @@
 //! is an error, an overflow to infinity is ignored.
 
 use faer::Mat;
-use total_pivot_solver::{SolveStatus, solve};
+use total_pivot_solver::{SolveStatus, Workspace, solve};
 
 /// Diagonal `n×(n+1)` system with the given diagonal and a zero last
 /// column
@@ -61,7 +61,8 @@ fn determinant_overflow_test() {
     testing_logger::setup();
     let mut matrix = diagonal_system(&[1e4; 100]);
 
-    let solution = solve(&mut matrix, Some(100), false).unwrap();
+    let mut work = Workspace::new(matrix.nrows());
+    let solution = solve(&mut matrix, Some(100), false, &mut work).unwrap();
 
     // The right-hand side is zero, so all unknowns are zero
     let mut expected = vec![0.0; 101];
@@ -84,7 +85,8 @@ fn determinant_nan_test() {
     testing_logger::setup();
     let mut matrix = diagonal_system(&[1e200, 1e200, 0.0]);
 
-    let result = solve(&mut matrix, Some(3), false);
+    let mut work = Workspace::new(matrix.nrows());
+    let result = solve(&mut matrix, Some(3), false, &mut work);
 
     assert!(result.is_err(), "solve must fail for a NaN determinant");
     testing_logger::validate(|logs| assert_logged(logs, log::Level::Error));

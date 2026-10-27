@@ -148,23 +148,99 @@ impl Fallback for CFallback {
     }
 }
 
+/// The buffers of a [`CModel`] and its [`CLinearSolver`], kept by the solver
+/// between calls, so that a solve doesn't allocate.
+pub(crate) struct ModelBuffers {
+    /// The facts of the latest model, filled from it for each solve
+    info: SystemInfo,
+    /// Column-major buffer of the Jacobian callback
+    jacobian: Box<[f64]>,
+    /// The perturbed point of the forward differences
+    x_perturbed: Box<[f64]>,
+    /// Column-major `n×n` matrix of the linear solver callback
+    linear_system: Box<[f64]>,
+    /// Solves without a linear solver callback
+    total_pivot: TotalPivot,
+}
+
+impl ModelBuffers {
+    /// Allocates the buffers for models with `num_residuals` residuals and
+    /// `num_unknowns` unknowns.
+    pub(crate) fn new(num_residuals: usize, num_unknowns: usize) -> Self {
+        ModelBuffers {
+            info: SystemInfo::new(num_residuals, num_unknowns),
+            jacobian: vec![0.0; num_residuals * num_unknowns].into(),
+            x_perturbed: vec![0.0; num_unknowns].into(),
+            linear_system: vec![0.0; num_residuals * num_residuals].into(),
+            total_pivot: TotalPivot::new(num_residuals),
+        }
+    }
+
+    /// Wraps `model` as a model of the solvers and its linear solver, or
+    /// returns `None` if it has no residual callback or no unknowns.
+    ///
+    /// The buffers are only allocated again if the sizes of `model` differ
+    /// from the latest one, for example when a solver switches to a model
+    /// with its own homotopy.
+    ///
+    /// # Safety
+    ///
+    /// `nominal`, `min` and `max` of `model` must be `NULL` or point to
+    /// `num_unknowns` values.
+    pub(crate) unsafe fn wrap<'b>(
+        &'b mut self,
+        model: &'b HomModel,
+    ) -> Option<(CModel<'b>, CLinearSolver<'b>)> {
+        let residual = model.residual?;
+        let (num_residuals, num_unknowns) = (model.num_residuals, model.num_unknowns);
+        if num_unknowns == 0 {
+            return None;
+        }
+        if (self.info.num_residuals, self.info.num_unknowns) != (num_residuals, num_unknowns) {
+            *self = ModelBuffers::new(num_residuals, num_unknowns);
+        }
+
+        let fill = |values: &mut [f64], pointer: *const f64, default: f64| {
+            if pointer.is_null() {
+                values.fill(default);
+            } else {
+                // SAFETY: guaranteed by the caller
+                values
+                    .copy_from_slice(unsafe { std::slice::from_raw_parts(pointer, num_unknowns) });
+            }
+        };
+        fill(&mut self.info.nominal, model.nominal, 1.0);
+        fill(&mut self.info.min, model.min, f64::NEG_INFINITY);
+        fill(&mut self.info.max, model.max, f64::INFINITY);
+        self.info.casual_tearing_set = model.casual_tearing_set;
+
+        let c_model = CModel {
+            residual: CResidual {
+                model,
+                residual,
+                info: &self.info,
+            },
+            jacobian: &mut self.jacobian,
+            x_perturbed: &mut self.x_perturbed,
+        };
+        let linear_solver = CLinearSolver {
+            callback: model.linear_solver,
+            user: model.user,
+            matrix: &mut self.linear_system,
+            total_pivot: &mut self.total_pivot,
+        };
+        Some((c_model, linear_solver))
+    }
+}
+
 /// The linear solver of a [`HomModel`] as a linear solver of Newton's method.
 pub(crate) struct CLinearSolver<'b> {
     callback: HomLinearSolver,
     user: *mut c_void,
     /// Column-major `n×n` buffer of the matrix the callback gets
     matrix: &'b mut [f64],
-}
-
-impl<'b> CLinearSolver<'b> {
-    /// The linear solver of `model`, with `matrix` as buffer for `n×n` values.
-    pub(crate) fn new(model: &HomModel, matrix: &'b mut [f64]) -> Self {
-        CLinearSolver {
-            callback: model.linear_solver,
-            user: model.user,
-            matrix,
-        }
-    }
+    /// Solves without a callback
+    total_pivot: &'b mut TotalPivot,
 }
 
 impl LinearSolver for CLinearSolver<'_> {
@@ -178,7 +254,7 @@ impl LinearSolver for CLinearSolver<'_> {
         y: &mut [f64],
     ) -> Result<SolveStatus, Singular> {
         let Some(callback) = self.callback else {
-            return TotalPivot.solve(system, casual_tearing_set, y);
+            return self.total_pivot.solve(system, casual_tearing_set, y);
         };
         let n = y.len();
         assert_eq!((system.nrows(), system.ncols()), (n, n + 1));
@@ -221,56 +297,35 @@ impl LinearSolver for CLinearSolver<'_> {
     }
 }
 
-/// A [`HomModel`] as a model of the solvers.
-pub(crate) struct CModel<'m> {
-    model: &'m HomModel,
+/// The residual callback of a [`HomModel`] with the facts of the model, the
+/// model the forward differences of a [`CModel`] evaluate.
+struct CResidual<'b> {
+    model: &'b HomModel,
     residual: unsafe extern "C" fn(user: *mut c_void, x: *const f64, f: *mut f64) -> c_int,
-    info: SystemInfo,
-    /// Column-major buffer of the Jacobian callback
-    jacobian: Box<[f64]>,
+    info: &'b SystemInfo,
 }
 
-impl<'m> CModel<'m> {
-    /// Wraps `model`, or returns `None` if it has no residual callback or no
-    /// unknowns.
-    ///
-    /// # Safety
-    ///
-    /// `nominal`, `min` and `max` of `model` must be `NULL` or point to
-    /// `num_unknowns` values that stay valid while the solver runs.
-    pub(crate) unsafe fn new(model: &'m HomModel) -> Option<Self> {
-        let residual = model.residual?;
-        let (num_residuals, num_unknowns) = (model.num_residuals, model.num_unknowns);
-        if num_unknowns == 0 {
-            return None;
-        }
-
-        // SAFETY: guaranteed by the caller
-        let values = |pointer: *const f64| -> Option<Box<[f64]>> {
-            (!pointer.is_null())
-                .then(|| unsafe { std::slice::from_raw_parts(pointer, num_unknowns) }.into())
-        };
-        let mut info = SystemInfo::new(num_residuals, num_unknowns);
-        if let Some(nominal) = values(model.nominal) {
-            info = info.with_nominal(nominal);
-        }
-        if let Some(min) = values(model.min) {
-            info = info.with_min(min);
-        }
-        if let Some(max) = values(model.max) {
-            info = info.with_max(max);
-        }
-        if model.casual_tearing_set {
-            info = info.with_casual_tearing_set();
-        }
-
-        Some(CModel {
-            model,
-            residual,
-            info,
-            jacobian: vec![0.0; num_residuals * num_unknowns].into(),
-        })
+impl ModelFunctions for CResidual<'_> {
+    fn info(&self) -> &SystemInfo {
+        self.info
     }
+
+    fn eval(&mut self, x: &[f64], res: &mut [f64]) -> Result<(), EvalError> {
+        assert_eq!(x.len(), self.info.num_unknowns);
+        assert_eq!(res.len(), self.info.num_residuals);
+        // SAFETY: the slices have the sizes the callback expects
+        let status = unsafe { (self.residual)(self.model.user, x.as_ptr(), res.as_mut_ptr()) };
+        eval_result(status)
+    }
+}
+
+/// A [`HomModel`] as a model of the solvers, see [`ModelBuffers::wrap`].
+pub(crate) struct CModel<'b> {
+    residual: CResidual<'b>,
+    /// Column-major buffer of the Jacobian callback
+    jacobian: &'b mut [f64],
+    /// The perturbed point of the forward differences
+    x_perturbed: &'b mut [f64],
 }
 
 /// The result of a callback
@@ -284,15 +339,11 @@ fn eval_result(status: c_int) -> Result<(), EvalError> {
 
 impl ModelFunctions for CModel<'_> {
     fn info(&self) -> &SystemInfo {
-        &self.info
+        self.residual.info
     }
 
     fn eval(&mut self, x: &[f64], res: &mut [f64]) -> Result<(), EvalError> {
-        assert_eq!(x.len(), self.info.num_unknowns);
-        assert_eq!(res.len(), self.info.num_residuals);
-        // SAFETY: the slices have the sizes the callback expects
-        let status = unsafe { (self.residual)(self.model.user, x.as_ptr(), res.as_mut_ptr()) };
-        eval_result(status)
+        self.residual.eval(x, res)
     }
 
     /// The Jacobian callback's `J(x)`, each column `j` multiplied by
@@ -305,11 +356,19 @@ impl ModelFunctions for CModel<'_> {
         x_scaling: &[f64],
         jacobian: MatMut<'_, f64>,
     ) -> Result<(), EvalError> {
-        let Some(callback) = self.model.jacobian else {
-            return forward_differences(self, x, fx, x_scaling, jacobian);
+        let Some(callback) = self.residual.model.jacobian else {
+            return forward_differences(
+                &mut self.residual,
+                x,
+                fx,
+                x_scaling,
+                self.x_perturbed,
+                jacobian,
+            );
         };
-        assert_eq!(x.len(), self.info.num_unknowns);
-        assert_eq!(fx.len(), self.info.num_residuals);
+        let info = self.residual.info;
+        assert_eq!(x.len(), info.num_unknowns);
+        assert_eq!(fx.len(), info.num_residuals);
         assert_eq!(x_scaling.len(), x.len(), "Scaling vector has wrong length");
         assert_eq!(
             (jacobian.nrows(), jacobian.ncols()),
@@ -321,7 +380,7 @@ impl ModelFunctions for CModel<'_> {
         // expects, `x` and `fx` have the sizes of the model
         let status = unsafe {
             callback(
-                self.model.user,
+                self.residual.model.user,
                 x.as_ptr(),
                 fx.as_ptr(),
                 self.jacobian.as_mut_ptr(),

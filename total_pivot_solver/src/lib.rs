@@ -47,7 +47,7 @@ mod pivot_search;
 /// Solving the linear system, the public entry point
 mod solve;
 
-pub use solve::{Solution, SolveError, SolveStatus, solve};
+pub use solve::{Solution, SolveError, SolveStatus, Workspace, solve};
 /// Pivot element found by [`pivot_search`]
 struct Pivot {
     /// Logical row of the pivot element

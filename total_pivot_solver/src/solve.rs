@@ -27,16 +27,37 @@
 
 use faer::Mat;
 use log::{error, trace, warn};
-use permuted_matrix::PermutedMatrix;
+use permuted_matrix::{Permutations, PermutedMatrix};
 
 use crate::backward_elimination::backward_elimination;
 use crate::forward_elimination::forward_elimination;
 
+/// Buffers of [`solve`] for `n×(n+1)` systems: the permutations of the pivot
+/// search and the solution.
+///
+/// Allocated once and reused, so a solve doesn't allocate.
+#[derive(Debug)]
+pub struct Workspace {
+    permutations: Permutations,
+    x: Box<[f64]>,
+}
+
+impl Workspace {
+    /// Allocates the buffers for `n×(n+1)` systems.
+    pub fn new(n: usize) -> Self {
+        Workspace {
+            permutations: Permutations::new(n, n + 1),
+            x: vec![0.0; n + 1].into(),
+        }
+    }
+}
+
 /// Result of a successful [`solve`].
 #[derive(Debug)]
-pub struct Solution {
-    /// Solution, `n+1` entries, the entry at `fixed_column` is 1
-    pub x: Box<[f64]>,
+pub struct Solution<'w> {
+    /// Solution, `n+1` entries, the entry at `fixed_column` is 1. It lives in
+    /// the [`Workspace`] of the solve.
+    pub x: &'w [f64],
     /// Numerical rank of the matrix, `n` for a regular system
     pub rank: usize,
     /// Column of `x` fixed to 1: `pos` if it was given, otherwise the column
@@ -93,6 +114,7 @@ pub enum SolveError {
 /// - `is_casual_tearing_set`: the system is the casual set of a dynamic
 ///   tearing. Only then a vanishing determinant (`|det| < 1e-9`) is reported
 ///   as [`SolveStatus::SolvedDeterminantZero`].
+/// - `work`: the buffers, for systems of the size of `matrix`.
 ///
 /// From C function `solveSystemWithTotalPivotSearch`. Like C, a rank-deficient
 /// but consistent system is solved with the unknowns without pivot set to 0,
@@ -105,12 +127,14 @@ pub enum SolveError {
 ///
 /// # Panics
 ///
-/// Panics if `matrix` is not `n×(n+1)` or `pos` is not a valid column index.
-pub fn solve(
+/// Panics if `matrix` is not `n×(n+1)`, `pos` is not a valid column index or
+/// `work` has another size.
+pub fn solve<'w>(
     matrix: &mut Mat<f64>,
     pos: Option<usize>,
     is_casual_tearing_set: bool,
-) -> Result<Solution, SolveError> {
+    work: &'w mut Workspace,
+) -> Result<Solution<'w>, SolveError> {
     let mut status = SolveStatus::Solved;
 
     let n_rows = matrix.nrows(); // n
@@ -126,7 +150,7 @@ pub fn solve(
         return Err(SolveError::MatrixNotFinite);
     }
 
-    let mut matrix = PermutedMatrix::new(matrix);
+    let mut matrix = PermutedMatrix::new(matrix, &mut work.permutations);
 
     // The fixed column is no pivot candidate
     let n_pivot_columns = if pos.is_some() { n_rows } else { n_cols };
@@ -157,19 +181,20 @@ pub fn solve(
     }
 
     // Solve even singular matrices
-    let x = backward_elimination(&matrix, rank)?;
+    backward_elimination(&matrix, rank, &mut work.x)?;
 
     if pos.is_none() {
         trace!(target: "NLS", "Position of largest value = {0}", matrix.column_permutation()[n_rows]);
     }
 
+    let fixed_column = match pos {
+        None => matrix.column_permutation()[n_rows],
+        Some(p) => p,
+    };
     Ok(Solution {
-        x,
+        x: &work.x,
         rank,
-        fixed_column: match pos {
-            None => matrix.column_permutation()[n_rows],
-            Some(p) => p,
-        },
+        fixed_column,
         status,
     })
 }

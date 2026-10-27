@@ -31,7 +31,7 @@
 use faer::{ColRef, Mat, MatRef};
 use nls_model::scaling::{self, scaled_squared_error, squared_error};
 use nls_model::{EvalError, ModelFunctions};
-use total_pivot_solver::SolveError;
+use total_pivot_solver::{SolveError, Workspace};
 
 /// How a corrector ended without an error.
 #[derive(Debug, PartialEq)]
@@ -70,6 +70,8 @@ pub(crate) struct CorrectorWorkspace {
     x_scaling: Box<[f64]>,
     /// The linear system of a Newton step, `n×(n+1)`
     jacobian: Mat<f64>,
+    /// Buffers of the total pivot solver
+    pivot: Workspace,
     /// Newton step
     dy: Box<[f64]>,
     /// Residual scaling of the latest Jacobian
@@ -84,6 +86,7 @@ impl CorrectorWorkspace {
         CorrectorWorkspace {
             x_scaling: x_scaling.into(),
             jacobian: Mat::zeros(m - 1, m),
+            pivot: Workspace::new(m - 1),
             dy: vec![0.0; m].into(),
             res_scaling: vec![1.0; m - 1].into(),
         }
@@ -145,8 +148,9 @@ pub(crate) fn corrector(
             &mut work.jacobian,
             Some(fixed),
             homotopy.info().casual_tearing_set,
+            &mut work.pivot,
         )?;
-        scaling::unscale(&solution.x, &work.x_scaling, &mut work.dy);
+        scaling::unscale(solution.x, &work.x_scaling, &mut work.dy);
         work.dy[fixed] = 0.0;
 
         for (y, dy) in y.iter_mut().zip(&work.dy) {
