@@ -46,6 +46,7 @@ unsafe extern "C" fn cubic_jacobian(
     x: *const f64,
     _: *const f64,
     jac: *mut f64,
+    _: usize,
 ) -> c_int {
     unsafe {
         *(user as *mut usize) += 1;
@@ -73,6 +74,27 @@ unsafe extern "C" fn quadratic(_: *mut c_void, x: *const f64, f: *mut f64) -> c_
         let f = std::slice::from_raw_parts_mut(f, 2);
         f[0] = x[0] * x[0] + x[1] - 3.0;
         f[1] = x[0] * x[1] - 2.0;
+    }
+    HOM_EVAL_OK
+}
+
+/// `J(x) = [[2x₀, 1], [x₁, x₀]]` of [`quadratic`], written with the leading
+/// dimension, counting its calls in `user`
+unsafe extern "C" fn quadratic_jacobian(
+    user: *mut c_void,
+    x: *const f64,
+    _: *const f64,
+    jac: *mut f64,
+    leading_dimension: usize,
+) -> c_int {
+    unsafe {
+        *(user as *mut usize) += 1;
+        let x = std::slice::from_raw_parts(x, 2);
+        let entry = |i: usize, j: usize| jac.add(i + j * leading_dimension);
+        *entry(0, 0) = 2.0 * x[0];
+        *entry(1, 0) = x[1];
+        *entry(0, 1) = 1.0;
+        *entry(1, 1) = x[0];
     }
     HOM_EVAL_OK
 }
@@ -270,6 +292,31 @@ fn start_point_checked_test() {
 
     assert_eq!(status, HomStatus::Solved);
     assert_eq!(calls, 1);
+}
+
+#[test]
+/// A Jacobian callback writes the columns with the leading dimension of the
+/// solver's matrix
+fn jacobian_leading_dimension_test() {
+    let mut calls = 0usize;
+    let model = HomModel {
+        user: (&raw mut calls).cast(),
+        jacobian: Some(quadratic_jacobian),
+        ..model(2, Some(quadratic))
+    };
+    let mut x = [1.5, 1.5];
+
+    let (status, solved_by) = solve(&model, &mut x);
+
+    assert_eq!(
+        (status, solved_by),
+        (HomStatus::Solved, Some(HomSolvedBy::Newton))
+    );
+    assert!(
+        (x[0] - 1.0).abs() < 1e-6 && (x[1] - 2.0).abs() < 1e-6,
+        "{x:?}"
+    );
+    assert!(calls > 0);
 }
 
 #[test]

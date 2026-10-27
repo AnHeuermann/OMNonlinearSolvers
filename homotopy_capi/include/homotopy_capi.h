@@ -127,9 +127,15 @@ typedef int (*HomResidual)(void *user, const double *x, double *f);
 
 // Evaluate the Jacobian `jacobian = J(x)` with `f = F(x)`.
 //
-// `jacobian` is a column-major `num_residuals×num_unknowns` matrix. Returns
-// a value like [`HomResidual`] and must return like it.
-typedef int (*HomJacobian)(void *user, const double *x, const double *f, double *jacobian);
+// `jacobian` is a column-major `num_residuals×num_unknowns` matrix whose
+// columns start `leading_dimension` entries apart, the entry `(i, j)` is
+// `jacobian[i + j*leading_dimension]`. Returns a value like [`HomResidual`]
+// and must return like it.
+typedef int (*HomJacobian)(void *user,
+                           const double *x,
+                           const double *f,
+                           double *jacobian,
+                           size_t leading_dimension);
 
 // A path starts from the point `y = (x, 0)` of `size` values towards
 // increasing `λ` for `direction` 1, decreasing for -1.

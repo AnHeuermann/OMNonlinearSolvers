@@ -54,14 +54,17 @@ pub type HomResidual =
 
 /// Evaluate the Jacobian `jacobian = J(x)` with `f = F(x)`.
 ///
-/// `jacobian` is a column-major `num_residuals×num_unknowns` matrix. Returns
-/// a value like [`HomResidual`] and must return like it.
+/// `jacobian` is a column-major `num_residuals×num_unknowns` matrix whose
+/// columns start `leading_dimension` entries apart, the entry `(i, j)` is
+/// `jacobian[i + j*leading_dimension]`. Returns a value like [`HomResidual`]
+/// and must return like it.
 pub type HomJacobian = Option<
     unsafe extern "C" fn(
         user: *mut c_void,
         x: *const f64,
         f: *const f64,
         jacobian: *mut f64,
+        leading_dimension: usize,
     ) -> c_int,
 >;
 
@@ -171,8 +174,6 @@ pub(crate) struct DerivativeStatistics {
 pub(crate) struct ModelBuffers {
     /// The facts of the latest model, filled from it for each solve
     info: SystemInfo,
-    /// Column-major buffer of the Jacobian callback
-    jacobian: Box<[f64]>,
     /// The perturbed point of the forward differences
     x_perturbed: Box<[f64]>,
     /// Column-major `n×n` matrix of the linear solver callback
@@ -189,7 +190,6 @@ impl ModelBuffers {
     pub(crate) fn new(num_residuals: usize, num_unknowns: usize) -> Self {
         ModelBuffers {
             info: SystemInfo::new(num_residuals, num_unknowns),
-            jacobian: vec![0.0; num_residuals * num_unknowns].into(),
             x_perturbed: vec![0.0; num_unknowns].into(),
             linear_system: vec![0.0; num_residuals * num_residuals].into(),
             total_pivot: TotalPivot::new(num_residuals),
@@ -247,7 +247,6 @@ impl ModelBuffers {
                 residual,
                 info: &self.info,
             },
-            jacobian: &mut self.jacobian,
             x_perturbed: &mut self.x_perturbed,
             statistics: &mut self.statistics,
         };
@@ -350,8 +349,6 @@ impl ModelFunctions for CResidual<'_> {
 /// A [`HomModel`] as a model of the solvers, see [`ModelBuffers::wrap`].
 pub(crate) struct CModel<'b> {
     residual: CResidual<'b>,
-    /// Column-major buffer of the Jacobian callback
-    jacobian: &'b mut [f64],
     /// The perturbed point of the forward differences
     x_perturbed: &'b mut [f64],
     /// Counts and times the forward differences
@@ -417,23 +414,27 @@ impl ModelFunctions for CModel<'_> {
             "Jacobian has wrong shape"
         );
 
-        // SAFETY: the buffer is column-major with the shape the callback
-        // expects, `x` and `fx` have the sizes of the model
+        assert_eq!(jacobian.row_stride(), 1, "Jacobian isn't column-major");
+        let leading_dimension =
+            usize::try_from(jacobian.col_stride()).expect("Jacobian has columns in order");
+
+        // SAFETY: the callback writes the shape of `jacobian` with its column
+        // stride, into memory `jacobian` borrows exclusively. `x` and `fx`
+        // have the sizes of the model.
         let status = unsafe {
             callback(
                 self.residual.model.user,
                 x.as_ptr(),
                 fx.as_ptr(),
-                self.jacobian.as_mut_ptr(),
+                jacobian.as_ptr_mut(),
+                leading_dimension,
             )
         };
         eval_result(status)?;
 
-        let rows = fx.len();
-        for ((j, column), scaling) in jacobian.col_iter_mut().enumerate().zip(x_scaling) {
-            let values = &self.jacobian[j * rows..(j + 1) * rows];
-            for (entry, value) in column.iter_mut().zip(values) {
-                *entry = value * scaling;
+        for (column, scaling) in jacobian.col_iter_mut().zip(x_scaling) {
+            for entry in column.iter_mut() {
+                *entry *= scaling;
             }
         }
         Ok(())

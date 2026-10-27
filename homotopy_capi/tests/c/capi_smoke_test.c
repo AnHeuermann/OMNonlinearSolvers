@@ -53,7 +53,8 @@ static int cubic(void *user, const double *x, double *f) {
 
 /* J(x) = 3x² − 2, counting its calls in user */
 static int cubic_jacobian(void *user, const double *x, const double *f,
-                          double *jacobian) {
+                          double *jacobian, size_t leading_dimension) {
+  (void)leading_dimension;
   (void)f;
   (*(int *)user)++;
   jacobian[0] = 3.0 * x[0] * x[0] - 2.0;
