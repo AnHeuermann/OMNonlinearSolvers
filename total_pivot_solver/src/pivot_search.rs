@@ -62,9 +62,8 @@ pub(crate) fn pivot_search(
         for (offset, value) in mat.row_from(row, stage..n_pivot_columns).enumerate() {
             let current_abs_value = value.abs();
             if current_abs_value > max_abs_value {
-                max_abs_value = current_abs_value;
-                col_index = stage + offset;
-                row_index = row;
+                (max_abs_value, row_index, col_index) =
+                    new_candidate(current_abs_value, row, stage + offset);
             }
         }
     }
@@ -74,6 +73,17 @@ pub(crate) fn pivot_search(
         column: col_index,
         abs_value: max_abs_value,
     }
+}
+
+/// The new candidate of [`pivot_search`], `(abs_value, row, column)`.
+///
+/// Cold and never inlined, so the comparison in the search stays a branch
+/// like in C. A new candidate is rare, and without the branch every
+/// comparison would wait for the previous one.
+#[cold]
+#[inline(never)]
+fn new_candidate(abs_value: f64, row: usize, column: usize) -> (f64, usize, usize) {
+    (abs_value, row, column)
 }
 
 #[cfg(test)]
