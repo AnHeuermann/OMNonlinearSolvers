@@ -104,13 +104,15 @@ unsafe extern "C" fn cramer(
     user: *mut c_void,
     n: usize,
     matrix: *mut f64,
+    leading_dimension: usize,
     rhs: *mut f64,
     determinant: *mut f64,
 ) -> c_int {
     assert_eq!(n, 2);
     unsafe {
         *(user as *mut usize) += 1;
-        let a = std::slice::from_raw_parts(matrix, 4);
+        let entry = |i: usize, j: usize| *matrix.add(i + j * leading_dimension);
+        let a = [entry(0, 0), entry(1, 0), entry(0, 1), entry(1, 1)];
         let b = std::slice::from_raw_parts_mut(rhs, 2);
         let det = a[0] * a[3] - a[2] * a[1];
         let y = [
@@ -128,6 +130,7 @@ unsafe extern "C" fn failing_solver(
     user: *mut c_void,
     _: usize,
     _: *mut f64,
+    _: usize,
     _: *mut f64,
     _: *mut f64,
 ) -> c_int {

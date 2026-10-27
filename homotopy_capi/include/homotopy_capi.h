@@ -181,7 +181,8 @@ typedef int (*HomFallback)(void *user, double *x);
 // Solve the linear system `matrix·y = rhs` of a step of Newton's method
 // after the first, for example with `dgesv` of LAPACK.
 //
-// `matrix` is the scaled Jacobian, a column-major `n×n` matrix that may be
+// `matrix` is the scaled Jacobian, a column-major `n×n` matrix whose columns
+// start `leading_dimension` entries apart, like `lda` of LAPACK. It may be
 // overwritten. `rhs` holds the scaled residual and receives the solution
 // `y`. `determinant` receives the determinant of `matrix`, which decides
 // whether the system of a casual tearing set is singular. Returns 0 if
@@ -189,6 +190,7 @@ typedef int (*HomFallback)(void *user, double *x);
 typedef int (*HomLinearSolver)(void *user,
                                size_t n,
                                double *matrix,
+                               size_t leading_dimension,
                                double *rhs,
                                double *determinant);
 

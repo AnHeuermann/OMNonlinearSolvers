@@ -83,7 +83,8 @@ pub type HomStartPointChecked = Option<unsafe extern "C" fn(user: *mut c_void)>;
 /// Solve the linear system `matrix·y = rhs` of a step of Newton's method
 /// after the first, for example with `dgesv` of LAPACK.
 ///
-/// `matrix` is the scaled Jacobian, a column-major `n×n` matrix that may be
+/// `matrix` is the scaled Jacobian, a column-major `n×n` matrix whose columns
+/// start `leading_dimension` entries apart, like `lda` of LAPACK. It may be
 /// overwritten. `rhs` holds the scaled residual and receives the solution
 /// `y`. `determinant` receives the determinant of `matrix`, which decides
 /// whether the system of a casual tearing set is singular. Returns 0 if
@@ -93,6 +94,7 @@ pub type HomLinearSolver = Option<
         user: *mut c_void,
         n: usize,
         matrix: *mut f64,
+        leading_dimension: usize,
         rhs: *mut f64,
         determinant: *mut f64,
     ) -> c_int,
@@ -176,8 +178,6 @@ pub(crate) struct ModelBuffers {
     info: SystemInfo,
     /// The perturbed point of the forward differences
     x_perturbed: Box<[f64]>,
-    /// Column-major `n×n` matrix of the linear solver callback
-    linear_system: Box<[f64]>,
     /// Solves without a linear solver callback
     total_pivot: TotalPivot,
     /// Of the latest solve
@@ -191,7 +191,6 @@ impl ModelBuffers {
         ModelBuffers {
             info: SystemInfo::new(num_residuals, num_unknowns),
             x_perturbed: vec![0.0; num_unknowns].into(),
-            linear_system: vec![0.0; num_residuals * num_residuals].into(),
             total_pivot: TotalPivot::new(num_residuals),
             statistics: DerivativeStatistics::default(),
         }
@@ -253,7 +252,6 @@ impl ModelBuffers {
         let linear_solver = CLinearSolver {
             callback: model.linear_solver,
             user: model.user,
-            matrix: &mut self.linear_system,
             total_pivot: &mut self.total_pivot,
         };
         Some((c_model, linear_solver))
@@ -264,8 +262,6 @@ impl ModelBuffers {
 pub(crate) struct CLinearSolver<'b> {
     callback: HomLinearSolver,
     user: *mut c_void,
-    /// Column-major `n×n` buffer of the matrix the callback gets
-    matrix: &'b mut [f64],
     /// Solves without a callback
     total_pivot: &'b mut TotalPivot,
 }
@@ -285,27 +281,23 @@ impl LinearSolver for CLinearSolver<'_> {
         };
         let n = y.len();
         assert_eq!((system.nrows(), system.ncols()), (n, n + 1));
-        assert_eq!(self.matrix.len(), n * n, "Buffer has wrong size");
+        assert_eq!(system.row_stride(), 1, "System isn't column-major");
+        let leading_dimension =
+            usize::try_from(system.col_stride()).expect("System has columns in order");
 
-        for (j, column) in system.col_iter().take(n).enumerate() {
-            for (entry, value) in self.matrix[j * n..(j + 1) * n]
-                .iter_mut()
-                .zip(column.iter())
-            {
-                *entry = *value;
-            }
-        }
         for (y, f) in y.iter_mut().zip(system.col(n).iter()) {
             *y = *f;
         }
 
         let mut determinant = 0.0;
-        // SAFETY: the buffers have the sizes the callback expects
+        // SAFETY: the callback gets the first `n` columns of `system`, which
+        // it may overwrite, with their column stride, and `y` of `n` entries
         let status = unsafe {
             callback(
                 self.user,
                 n,
-                self.matrix.as_mut_ptr(),
+                system.as_ptr_mut(),
+                leading_dimension,
                 y.as_mut_ptr(),
                 &mut determinant,
             )

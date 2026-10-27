@@ -247,8 +247,10 @@ static void solve_with_fallback(void) {
 }
 
 /* Solves the 1×1 linear system, counting its calls in user */
-static int linear_solver(void *user, size_t n, double *matrix, double *rhs, double *determinant) {
+static int linear_solver(void *user, size_t n, double *matrix, size_t leading_dimension,
+                         double *rhs, double *determinant) {
   (void)n;
+  (void)leading_dimension;
   (*(int *)user)++;
   rhs[0] /= matrix[0];
   *determinant = matrix[0];
