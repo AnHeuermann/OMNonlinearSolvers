@@ -1,0 +1,73 @@
+name: Mutation testing
+
+on:
+  pull_request:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  mutants:
+    name: Mutation testing
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # stable
+        with:
+          toolchain: stable
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-mutants
+      # Pull requests test the mutants of their changes, the weekly and manual
+      # runs all of them. Missed mutants are reported, not failed: swaps of `<`
+      # and `<=` on floats are expected to be missed.
+      - name: Run cargo-mutants
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          args=(--jobs 4 --no-shuffle)
+          if [ -n "$BASE_REF" ]; then
+            git diff "origin/$BASE_REF...HEAD" > changes.diff
+            args+=(--in-diff changes.diff)
+          fi
+          status=0
+          cargo mutants "${args[@]}" || status=$?
+          # 2: mutants missed, 3: mutants timed out
+          if [ "$status" -ne 0 ] && [ "$status" -ne 2 ] && [ "$status" -ne 3 ]; then
+            exit "$status"
+          fi
+      - name: Summary
+        if: always()
+        run: |
+          echo '## Mutation testing' >> "$GITHUB_STEP_SUMMARY"
+          if [ ! -d mutants.out ]; then
+            echo 'No mutants in the changes.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          cd mutants.out
+          {
+            for outcome in caught missed timeout unviable; do
+              echo "* $outcome: $(wc -l < "$outcome.txt")"
+            done
+            if [ -s missed.txt ]; then
+              echo
+              echo '### Missed'
+              echo '```text'
+              sed 's/ in [0-9.]*s build.*//' missed.txt
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: mutants.out
+          path: mutants.out

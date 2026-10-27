@@ -168,6 +168,11 @@ to date, runs the tests, runs the C tests, and builds the documentation. The
 coverage job prints a summary on the run's page and uploads the HTML report as
 the `coverage` artifact.
 
+[mutants.yml](.github/workflows/mutants.yml) runs cargo-mutants: on a pull
+request for the mutants in its changes, every Monday and on demand for all of
+them. It lists the missed mutants on the run's page and uploads `mutants.out`
+as an artifact, but doesn't fail for missed mutants.
+
 [cargo-llvm-cov]: https://github.com/taiki-e/cargo-llvm-cov
 [cargo-mutants]: https://mutants.rs/
 [cbindgen]: https://github.com/mozilla/cbindgen
