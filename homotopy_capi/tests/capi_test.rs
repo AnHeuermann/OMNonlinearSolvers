@@ -125,6 +125,20 @@ unsafe extern "C" fn cramer(
     0
 }
 
+/// Solves like [`cramer`], but reports a vanishing determinant
+unsafe extern "C" fn zero_determinant(
+    user: *mut c_void,
+    n: usize,
+    matrix: *mut f64,
+    leading_dimension: usize,
+    rhs: *mut f64,
+    determinant: *mut f64,
+) -> c_int {
+    let status = unsafe { cramer(user, n, matrix, leading_dimension, rhs, determinant) };
+    unsafe { *determinant = 0.0 };
+    status
+}
+
 /// A linear solver that fails, counting its calls in `user`
 unsafe extern "C" fn failing_solver(
     user: *mut c_void,
@@ -146,6 +160,32 @@ unsafe extern "C" fn asserts(_: *mut c_void, _: *const f64, _: *mut f64) -> c_in
 /// Violates its constraint everywhere
 unsafe extern "C" fn violates(_: *mut c_void, _: *const f64, _: *mut f64) -> c_int {
     HOM_EVAL_CONSTRAINT_VIOLATED
+}
+
+/// Violates its constraint everywhere, counting its calls in `user`
+unsafe extern "C" fn violates_counted(user: *mut c_void, _: *const f64, _: *mut f64) -> c_int {
+    unsafe { *(user as *mut usize) += 1 };
+    HOM_EVAL_CONSTRAINT_VIOLATED
+}
+
+/// `J(x) = [[1, 2], [3, −1]]` of [`linear`], written with the leading
+/// dimension, counting its calls in `user`
+unsafe extern "C" fn linear_jacobian(
+    user: *mut c_void,
+    _: *const f64,
+    _: *const f64,
+    jac: *mut f64,
+    leading_dimension: usize,
+) -> c_int {
+    unsafe {
+        *(user as *mut usize) += 1;
+        let entry = |i: usize, j: usize| jac.add(i + j * leading_dimension);
+        *entry(0, 0) = 1.0;
+        *entry(1, 0) = 3.0;
+        *entry(0, 1) = 2.0;
+        *entry(1, 1) = -1.0;
+    }
+    HOM_EVAL_OK
 }
 
 /// The model's own homotopy `H(x, λ) = x − 2λ`
@@ -762,4 +802,75 @@ fn fallback_test() {
     );
     assert_eq!(calls, 1);
     assert_eq!(x, [-1.769_292_354_238_631]);
+}
+
+#[test]
+/// A violated constraint gives up at once, also for a system that isn't a
+/// casual tearing set, where an assert moves the start point twice
+fn constraint_violated_no_retry_test() {
+    let mut calls = 0usize;
+    let model = HomModel {
+        user: (&raw mut calls).cast(),
+        ..model(1, Some(violates_counted))
+    };
+    let mut x = [1.0];
+
+    let (status, _) = solve(&model, &mut x);
+
+    assert_eq!(status, HomStatus::ModelError);
+    assert_eq!(calls, 1);
+}
+
+#[test]
+/// A vanishing determinant of the linear solver callback fails a casual
+/// tearing set, but not a system that isn't one
+fn zero_determinant_test() {
+    let mut calls = 0usize;
+    let model = HomModel {
+        user: (&raw mut calls).cast(),
+        linear_solver: Some(zero_determinant),
+        ..model(2, Some(quadratic))
+    };
+
+    let (status, _) = solve(&model, &mut [1.5, 1.5]);
+    assert_eq!(status, HomStatus::Solved);
+
+    let casual = HomModel {
+        casual_tearing_set: true,
+        ..model
+    };
+    let (status, _) = solve(&casual, &mut [1.5, 1.5]);
+    assert_eq!(status, HomStatus::NotSolved);
+}
+
+#[test]
+/// The columns of an analytical Jacobian are scaled with the variable
+/// scaling, here 10 from the start point `(10, 10)`. With the exact Jacobian
+/// the linear system takes two iterations: the step to the solution, and the
+/// step of length 0 that shows it converged.
+fn jacobian_scaling_test() {
+    let mut calls = 0usize;
+    let model = HomModel {
+        user: (&raw mut calls).cast(),
+        jacobian: Some(linear_jacobian),
+        ..model(2, Some(linear))
+    };
+    let mut x = [10.0, 10.0];
+
+    let statistics = unsafe {
+        let solver = hom_solver_new(2, null());
+        assert_eq!(
+            hom_solve(solver, &model, x.as_mut_ptr(), null_mut()),
+            HomStatus::Solved
+        );
+        let statistics = hom_solver_statistics(solver);
+        hom_solver_free(solver);
+        statistics
+    };
+
+    assert!(
+        (x[0] - 1.0).abs() < 1e-12 && (x[1] - 2.0).abs() < 1e-12,
+        "{x:?}"
+    );
+    assert_eq!(statistics.newton_iterations, 2);
 }
