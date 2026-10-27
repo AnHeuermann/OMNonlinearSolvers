@@ -143,4 +143,25 @@ mod cubic_interpolation_tests {
     fn trial_point_order_test() {
         assert_eq!(interpolate(-1.0, 4.0, 0.25, 1.0), Some(0.5));
     }
+
+    #[test]
+    /// The fits of [`parabola_test`], [`cubic_test`] and
+    /// [`cubic_conjugate_test`] from trial points below 1, where dividing and
+    /// multiplying by `λ²` differ
+    fn trial_points_below_one_test() {
+        assert_eq!(interpolate(4.0, 0.0, 0.5, 0.125), Some(0.25));
+        assert_eq!(interpolate(-1.0, 4.0, 0.5, 0.125), Some(0.5));
+        assert_eq!(interpolate(2.75, -1.0, 0.75, 0.25), Some(0.5));
+    }
+
+    #[test]
+    /// `φ(λ) = 1 − 2λ + λ² + 10⁻¹²λ³` has its minimum at
+    /// `λ = 1 − 1.5·10⁻¹² + O(10⁻²⁴)`. With `a₂ > 0` and a tiny `a₃`, the
+    /// root `(−a₂ + √d)/(3a₃)` loses all but four digits to cancellation, its
+    /// conjugate form `−g/(a₂ + √d)` keeps them.
+    fn cubic_conjugate_cancellation_test() {
+        let lambda = interpolate(1.0, 1e-12, 1.0, 0.5).unwrap();
+
+        assert!((lambda - (1.0 - 1.5e-12)).abs() < 1e-14, "got {lambda}");
+    }
 }

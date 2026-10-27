@@ -266,6 +266,25 @@ mod line_search_tests {
         assert_eq!(cubic_step(err, g, &p1, &p2), 0.5);
     }
 
+    #[test]
+    /// Without a finite minimum the cubic step halves `λ₁`, also below 1:
+    /// trial points on the line `φ(λ) = 1 − 2λ` fit `a₂ = a₃ = 0`, the
+    /// minimum of the parabola is `+∞`
+    fn cubic_step_not_finite_damped_test() {
+        let err = 1.0;
+        let g = -2.0 * err;
+        let p1 = TrialPoint {
+            lambda: 0.5,
+            error: 0.0,
+        };
+        let p2 = TrialPoint {
+            lambda: 0.25,
+            error: 0.5,
+        };
+
+        assert_eq!(cubic_step(err, g, &p1, &p2), 0.25);
+    }
+
     /// Start with the error `err` and the Newton slope `g = −2·err`, the same
     /// scaled and unscaled
     fn start(err: f64) -> Start {

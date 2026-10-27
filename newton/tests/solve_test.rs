@@ -27,9 +27,10 @@
 
 //! Tests of the Newton solver on small systems.
 
+use faer::MatMut;
 use newton::settings::Settings;
 use newton::{NewtonError, NewtonStatus, NewtonWorkspace, solve};
-use nls_model::{ClosureModel, EvalError, ModelFunctions};
+use nls_model::{ClosureModel, EvalError, ModelFunctions, SystemInfo};
 
 /// Solve `model` from `x0` with the default settings
 fn newton(
@@ -231,5 +232,69 @@ fn not_finite_test() {
     assert!(
         matches!(result, Err(NewtonError::Singular)),
         "got {result:?}"
+    );
+}
+
+/// `F(x) = atan(x)` with its analytical Jacobian `1/(1 + x²)`
+struct Atan {
+    info: SystemInfo,
+}
+
+impl ModelFunctions for Atan {
+    fn info(&self) -> &SystemInfo {
+        &self.info
+    }
+
+    fn eval(&mut self, x: &[f64], res: &mut [f64]) -> Result<(), EvalError> {
+        res[0] = x[0].atan();
+        Ok(())
+    }
+
+    fn derivative(
+        &mut self,
+        x: &[f64],
+        _: &[f64],
+        x_scaling: &[f64],
+        mut jacobian: MatMut<'_, f64>,
+    ) -> Result<(), EvalError> {
+        jacobian[(0, 0)] = x_scaling[0] / (1.0 + x[0] * x[0]);
+        Ok(())
+    }
+}
+
+#[test]
+/// The first step of `atan(x) = 0` from `x₀ = 1.28` is damped with the
+/// quadratic step of the line search.
+///
+/// The Newton step `dy = −atan(x₀)·(1 + x₀²) ≈ −2.39` overshoots to `−1.11`,
+/// where `φ(1) = atan(x₀ + dy)² ≈ 0.856·err` with `err = atan(x₀)²`. That is
+/// above the Armijo bound `err + 0.1·g = 0.8·err` for the slope `g = −2·err`,
+/// also for the scaled errors, which have the same ratio. The quadratic step
+/// is `λ₂ = −g/(2(φ(1) − err − g)) = err/(φ(1) + err) ≈ 0.539`. Like in C, the
+/// cubic step only follows if `φ(1)` is above the Armijo bound at `λ₂`,
+/// `err + 0.1·λ₂·g ≈ 0.892·err`, which it isn't. One iteration stops at
+/// `x₀ + λ₂·dy`.
+fn damped_step_test() {
+    let mut model = Atan {
+        info: SystemInfo::new(1, 1),
+    };
+    let x0: f64 = 1.28;
+    let dy = -x0.atan() * (1.0 + x0 * x0);
+    let err = x0.atan().powi(2);
+    let phi1 = (x0 + dy).atan().powi(2);
+    let expected = x0 + err / (phi1 + err) * dy;
+    let mut x = [x0];
+    let mut work = NewtonWorkspace::new(1, 1);
+
+    let settings = Settings::new(1).with_maximum_iterations(1);
+    let result = solve(&mut model, &mut x, &settings, &mut work);
+
+    assert!(
+        matches!(result, Err(NewtonError::MaxIterations)),
+        "got {result:?}"
+    );
+    assert!(
+        (x[0] - expected).abs() < 1e-12,
+        "got {x:?}, expected {expected}"
     );
 }
