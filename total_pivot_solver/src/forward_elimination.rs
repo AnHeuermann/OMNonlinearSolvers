@@ -68,10 +68,8 @@ pub(crate) fn forward_elimination(
 fn eliminate_below_pivot(matrix: &mut PermutedMatrix<'_, f64>, i: usize) {
     for k in i + 1..matrix.nrows() {
         let multiplier = -matrix[(k, i)] / matrix[(i, i)];
-
-        for j in i + 1..matrix.ncols() {
-            matrix[(k, j)] += multiplier * matrix[(i, j)];
-        }
+        let ncols = matrix.ncols();
+        matrix.add_scaled_row(k, i, multiplier, i + 1..ncols);
 
         matrix[(k, i)] = 0.0;
     }
@@ -94,13 +92,14 @@ mod forward_elimination_tests {
     #[test]
     /// Example from Wiki: https://en.wikipedia.org/wiki/Gaussian_elimination
     fn gauss_elimination_test() {
-        let mut m = mat![
+        let m = mat![
             [1.0, 3.0, 1.0, -9.0],
             [1.0, 1.0, -1.0, -1.0],
             [3.0, 11.0, 5.0, -35.0]
         ];
         let mut permutations = Permutations::new(m.nrows(), m.ncols());
-        let mut p = PermutedMatrix::new(&mut m, &mut permutations);
+        let mut values = crate::values_of(&m);
+        let mut p = PermutedMatrix::new(&mut values, &mut permutations);
 
         // Step 0: subtract 1·row 0 from row 1 and 3·row 0 from row 2
         let expected_result = mat![
@@ -148,14 +147,15 @@ mod forward_elimination_tests {
     /// [   0   0   12/7  -8/7 ]
     /// ```
     fn forward_elimination_test() {
-        let mut m = mat![
+        let m = mat![
             [0.0, 2.0, 0.0, -4.0],
             [3.0, 0.0, 1.0, -6.0],
             [0.0, 1.0, 4.0, -14.0]
         ];
         let n_pivot_columns = m.ncols();
         let mut permutations = Permutations::new(m.nrows(), m.ncols());
-        let mut p = PermutedMatrix::new(&mut m, &mut permutations);
+        let mut values = crate::values_of(&m);
+        let mut p = PermutedMatrix::new(&mut values, &mut permutations);
 
         let rank = forward_elimination(&mut p, n_pivot_columns);
 

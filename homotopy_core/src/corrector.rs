@@ -145,7 +145,7 @@ pub(crate) fn corrector(
             .copy_from(ColRef::from_slice(h));
         scaling::rows(work.jacobian.as_mut());
         let solution = total_pivot_solver::solve(
-            &mut work.jacobian,
+            &work.jacobian,
             Some(fixed),
             homotopy.info().casual_tearing_set,
             &mut work.pivot,

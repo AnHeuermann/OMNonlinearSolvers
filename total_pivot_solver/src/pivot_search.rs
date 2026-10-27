@@ -59,11 +59,11 @@ pub(crate) fn pivot_search(
     let mut row_index = stage;
 
     for row in stage..mat.nrows() {
-        for col in stage..n_pivot_columns {
-            let current_abs_value = mat[(row, col)].abs();
+        for (offset, value) in mat.row_from(row, stage..n_pivot_columns).enumerate() {
+            let current_abs_value = value.abs();
             if current_abs_value > max_abs_value {
                 max_abs_value = current_abs_value;
-                col_index = col;
+                col_index = stage + offset;
                 row_index = row;
             }
         }
@@ -90,9 +90,10 @@ mod pivot_search_tests {
 
     #[test]
     fn largest_absolute_value_test() {
-        let mut a = mat![[1.0, -7.0], [3.0, 2.0]];
+        let a = mat![[1.0, -7.0], [3.0, 2.0]];
         let mut permutations = Permutations::new(a.nrows(), a.ncols());
-        let m = PermutedMatrix::new(&mut a, &mut permutations);
+        let mut values = crate::values_of(&a);
+        let m = PermutedMatrix::new(&mut values, &mut permutations);
 
         // The largest absolute value is negative
         assert_eq!(search(&m, 0), (0, 1, 7.0));
@@ -100,9 +101,10 @@ mod pivot_search_tests {
 
     #[test]
     fn tie_keeps_first_test() {
-        let mut a = mat![[2.0, 5.0], [5.0, 1.0]];
+        let a = mat![[2.0, 5.0], [5.0, 1.0]];
         let mut permutations = Permutations::new(a.nrows(), a.ncols());
-        let m = PermutedMatrix::new(&mut a, &mut permutations);
+        let mut values = crate::values_of(&a);
+        let m = PermutedMatrix::new(&mut values, &mut permutations);
 
         // Row by row, (0, 1) is found before (1, 0). Strict `>` keeps the first.
         assert_eq!(search(&m, 0), (0, 1, 5.0));
@@ -110,27 +112,30 @@ mod pivot_search_tests {
 
     #[test]
     fn diagonal_wins_tie_test() {
-        let mut a = mat![[4.0, -4.0], [4.0, 4.0]];
+        let a = mat![[4.0, -4.0], [4.0, 4.0]];
         let mut permutations = Permutations::new(a.nrows(), a.ncols());
-        let m = PermutedMatrix::new(&mut a, &mut permutations);
+        let mut values = crate::values_of(&a);
+        let m = PermutedMatrix::new(&mut values, &mut permutations);
 
         assert_eq!(search(&m, 0), (0, 0, 4.0));
     }
 
     #[test]
     fn zero_matrix_test() {
-        let mut a = mat![[0.0, 0.0], [0.0, 0.0]];
+        let a = mat![[0.0, 0.0], [0.0, 0.0]];
         let mut permutations = Permutations::new(a.nrows(), a.ncols());
-        let m = PermutedMatrix::new(&mut a, &mut permutations);
+        let mut values = crate::values_of(&a);
+        let m = PermutedMatrix::new(&mut values, &mut permutations);
 
         assert_eq!(search(&m, 0), (0, 0, 0.0));
     }
 
     #[test]
     fn stage_ignores_eliminated_part_test() {
-        let mut a = mat![[9.0, 8.0, 7.0], [6.0, 1.0, 2.0], [5.0, 3.0, 1.0]];
+        let a = mat![[9.0, 8.0, 7.0], [6.0, 1.0, 2.0], [5.0, 3.0, 1.0]];
         let mut permutations = Permutations::new(a.nrows(), a.ncols());
-        let m = PermutedMatrix::new(&mut a, &mut permutations);
+        let mut values = crate::values_of(&a);
+        let m = PermutedMatrix::new(&mut values, &mut permutations);
 
         // At stage 1 only rows 1..3 and columns 1..3 are searched
         assert_eq!(search(&m, 1), (2, 1, 3.0));
@@ -138,9 +143,10 @@ mod pivot_search_tests {
 
     #[test]
     fn permuted_matrix_test() {
-        let mut a = mat![[1.0, 2.0], [3.0, 4.0]];
+        let a = mat![[1.0, 2.0], [3.0, 4.0]];
         let mut permutations = Permutations::new(a.nrows(), a.ncols());
-        let mut m = PermutedMatrix::new(&mut a, &mut permutations);
+        let mut values = crate::values_of(&a);
+        let mut m = PermutedMatrix::new(&mut values, &mut permutations);
         m.swap_rows(0, 1);
 
         // Logical matrix is [[3, 4], [1, 2]], the position is logical too
@@ -154,9 +160,10 @@ mod pivot_search_tests {
     /// largest entry. It is only a pivot candidate if all `n+1` columns are
     /// searched (`pos = None`), not if the last column is the fixed one.
     fn n_pivot_columns_limits_columns_test() {
-        let mut a = mat![[2.0, 1.0, -5.0], [1.0, 3.0, -10.0]];
+        let a = mat![[2.0, 1.0, -5.0], [1.0, 3.0, -10.0]];
         let mut permutations = Permutations::new(a.nrows(), a.ncols());
-        let m = PermutedMatrix::new(&mut a, &mut permutations);
+        let mut values = crate::values_of(&a);
+        let m = PermutedMatrix::new(&mut values, &mut permutations);
 
         // All 3 columns: the -10 of the right-hand side wins
         let pivot = pivot_search(&m, 0, 3);

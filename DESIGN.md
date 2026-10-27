@@ -146,6 +146,10 @@ The pivot search swaps rows and columns of a `PermutedMatrix`, a view that
 only swaps entries of two index permutations. Algorithms use logical
 positions, the data in memory never moves.
 
+The view is of a plain slice, column after column, which the total pivot
+solver copies the faer matrix into. Indexing a faer matrix checks its bounds
+with every access, which made the solver much slower than C's.
+
 ## Errors and Results
 
 ### Enums instead of status codes

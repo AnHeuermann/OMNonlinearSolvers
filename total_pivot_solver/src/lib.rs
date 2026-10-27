@@ -48,6 +48,14 @@ mod pivot_search;
 mod solve;
 
 pub use solve::{Solution, SolveError, SolveStatus, Workspace, solve};
+
+/// The values of `m`, column after column, for a `PermutedMatrix` in tests
+#[cfg(test)]
+fn values_of(m: &faer::Mat<f64>) -> Vec<f64> {
+    m.col_iter()
+        .flat_map(|column| column.iter().copied().collect::<Vec<_>>())
+        .collect()
+}
 /// Pivot element found by [`pivot_search`]
 struct Pivot {
     /// Logical row of the pivot element

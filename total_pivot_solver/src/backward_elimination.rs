@@ -98,13 +98,14 @@ mod backward_elimination_tests {
 
     #[test]
     fn backward_elimination_test() {
-        let mut m = mat![
+        let m = mat![
             [1.0, 3.0, 1.0, -9.0],
             [0.0, -2.0, -2.0, 8.0],
             [0.0, 0.0, 1.0, 2.0]
         ];
         let mut permutations = Permutations::new(m.nrows(), m.ncols());
-        let p = PermutedMatrix::new(&mut m, &mut permutations);
+        let mut values = crate::values_of(&m);
+        let p = PermutedMatrix::new(&mut values, &mut permutations);
 
         let mut x = [0.0; 4];
         backward_elimination(&p, 3, &mut x).unwrap();
@@ -123,13 +124,14 @@ mod backward_elimination_tests {
     /// `x = [-3, 4, 0]`, the solution `[-3 + 2·x₃, 4 - x₃, x₃]` of the
     /// original system for `x₃ = 0`.
     fn backward_elimination_rank_deficient_test() {
-        let mut m = mat![
+        let m = mat![
             [1.0, 3.0, 1.0, -9.0],
             [0.0, -2.0, -2.0, 8.0],
             [0.0, 0.0, 0.0, 0.0]
         ];
         let mut permutations = Permutations::new(m.nrows(), m.ncols());
-        let p = PermutedMatrix::new(&mut m, &mut permutations);
+        let mut values = crate::values_of(&m);
+        let p = PermutedMatrix::new(&mut values, &mut permutations);
 
         let mut x = [0.0; 4];
         backward_elimination(&p, 2, &mut x).unwrap();
@@ -151,13 +153,14 @@ mod backward_elimination_tests {
     /// a right-hand side of 5. Its equation reads `0 = 5`, so there is no
     /// solution.
     fn backward_elimination_under_determined_test() {
-        let mut m = mat![
+        let m = mat![
             [1.0, 3.0, 1.0, -9.0],
             [0.0, -2.0, -2.0, 8.0],
             [0.0, 0.0, 0.0, 5.0]
         ];
         let mut permutations = Permutations::new(m.nrows(), m.ncols());
-        let p = PermutedMatrix::new(&mut m, &mut permutations);
+        let mut values = crate::values_of(&m);
+        let p = PermutedMatrix::new(&mut values, &mut permutations);
 
         let result = backward_elimination(&p, 2, &mut [0.0; 4]);
 

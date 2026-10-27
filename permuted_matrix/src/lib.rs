@@ -25,13 +25,15 @@
  *
  */
 
-//! A view of a [`faer::Mat`] with permuted rows and columns.
+//! A view of a column-major matrix with permuted rows and columns.
 //!
 //! [`PermutedMatrix`] swaps rows and columns by swapping entries of two index
-//! permutations, the data of the matrix never moves. The permutations are a
-//! [`Permutations`] buffer of the caller, so a view doesn't allocate. Elements are accessed by
-//! their logical (permuted) position with `m[(i, j)]`, which reads or writes
-//! the physical position `(row_permutation[i], column_permutation[j])`.
+//! permutations, the data of the matrix never moves. The matrix is a slice of
+//! its values, column after column, and the permutations are a
+//! [`Permutations`] buffer of the caller, so a view doesn't allocate. Elements
+//! are accessed by their logical (permuted) position with `m[(i, j)]`, which
+//! reads or writes the physical position
+//! `(row_permutation[i], column_permutation[j])`.
 //! [`PermutedMatrix::to_mat`] creates a new matrix with the permutations
 //! applied, [`PermutedMatrix::row`], [`PermutedMatrix::row_iter`] and
 //! [`PermutedMatrix::diagonal`] iterate over elements in logical order, and
@@ -46,7 +48,8 @@
 //! use faer::mat;
 //! use permuted_matrix::{PermutedMatrix, Permutations};
 //!
-//! let mut m = mat![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]];
+//! // [[1, 2, 3], [4, 5, 6]], column after column
+//! let mut m = [1.0, 4.0, 2.0, 5.0, 3.0, 6.0];
 //! let mut permutations = Permutations::new(2, 3);
 //! let mut p = PermutedMatrix::new(&mut m, &mut permutations);
 //!
@@ -57,14 +60,14 @@
 //!
 //! // Writes go to the physical position
 //! p[(0, 0)] = 10.0;
-//! assert_eq!(m, mat![[1.0, 2.0, 3.0], [4.0, 5.0, 10.0]]);
+//! assert_eq!(m, [1.0, 4.0, 2.0, 5.0, 3.0, 10.0]);
 //! ```
 
 use std::fmt::{self};
 use std::iter::Iterator;
 
 use faer::Mat;
-use std::ops::{Index, IndexMut};
+use std::ops::{Add, Index, IndexMut, Mul, Range};
 
 /// The row and column permutations of a [`PermutedMatrix`], allocated once
 /// for matrices of one shape.
@@ -97,52 +100,54 @@ impl Permutations {
     }
 }
 
-/// View of a borrowed matrix with permuted rows and columns.
+/// View of a borrowed column-major matrix with permuted rows and columns.
 ///
 /// All positions in the methods of this type are logical positions, see the
 /// [crate documentation](crate). The `Debug` output shows the internal state,
-/// the physical matrix and both permutations, while `Display` shows the
+/// the physical values and both permutations, while `Display` shows the
 /// logical matrix.
 #[derive(Debug)]
 pub struct PermutedMatrix<'a, T> {
-    /// Borrowed matrix, its memory layout is never changed by the view
-    matrix: &'a mut Mat<T>,
-    /// Borrowed permutations
+    /// Borrowed values, column after column, never moved by the view
+    values: &'a mut [T],
+    /// Borrowed permutations, their lengths are the shape of the matrix
     permutations: &'a mut Permutations,
 }
 
 impl<'a, T> PermutedMatrix<'a, T> {
-    /// Creates a view of `matrix` without any permutation, logical and
-    /// physical positions are the same. `permutations` is reset and holds the
+    /// Creates a view of the matrix `values`, column after column, with the
+    /// shape of `permutations`, without any permutation: logical and physical
+    /// positions are the same. `permutations` is reset and holds the
     /// permutations of the view.
     ///
-    /// The matrix stays borrowed while the view exists. Writes through the
-    /// view change `matrix`, the data is never copied.
+    /// The values stay borrowed while the view exists. Writes through the
+    /// view change `values`, the data is never copied.
     ///
     /// # Panics
     ///
-    /// Panics if `permutations` doesn't have the shape of `matrix`.
-    pub fn new(matrix: &'a mut Mat<T>, permutations: &'a mut Permutations) -> Self {
+    /// Panics if `values` doesn't have one entry per element of the shape of
+    /// `permutations`.
+    pub fn new(values: &'a mut [T], permutations: &'a mut Permutations) -> Self {
         assert_eq!(
-            (permutations.rows.len(), permutations.columns.len()),
-            (matrix.nrows(), matrix.ncols()),
+            values.len(),
+            permutations.rows.len() * permutations.columns.len(),
             "Permutations have the wrong shape"
         );
         permutations.reset();
         PermutedMatrix {
-            matrix,
+            values,
             permutations,
         }
     }
 
     /// Returns the number of rows of the matrix.
     pub fn nrows(&self) -> usize {
-        self.matrix.nrows()
+        self.permutations.rows.len()
     }
 
     /// Returns the number of columns of the matrix.
     pub fn ncols(&self) -> usize {
-        self.matrix.ncols()
+        self.permutations.columns.len()
     }
 
     /// Returns the row permutation.
@@ -167,7 +172,11 @@ impl<'a, T> PermutedMatrix<'a, T> {
     /// This is not the physical diagonal of the borrowed matrix, unless no
     /// rows or columns were swapped.
     pub fn diagonal(&self) -> impl DoubleEndedIterator<Item = &T> + ExactSizeIterator<Item = &T> {
-        let ndiag = self.matrix.ncols().min(self.matrix.nrows());
+        let ndiag = self
+            .permutations
+            .columns
+            .len()
+            .min(self.permutations.rows.len());
         (0..ndiag).map(move |i| &self[(i, i)])
     }
 
@@ -181,7 +190,7 @@ impl<'a, T> PermutedMatrix<'a, T> {
         &self,
         i: usize,
     ) -> impl DoubleEndedIterator<Item = &T> + ExactSizeIterator<Item = &T> {
-        (0..self.matrix.ncols()).map(move |j| &self[(i, j)])
+        self.row_from(i, 0..self.ncols())
     }
 
     /// Returns an iterator over all logical rows, each one an iterator over
@@ -190,7 +199,7 @@ impl<'a, T> PermutedMatrix<'a, T> {
         &self,
     ) -> impl DoubleEndedIterator<Item = impl DoubleEndedIterator<Item = &T>>
     + ExactSizeIterator<Item = impl ExactSizeIterator<Item = &T>> {
-        (0..self.matrix.nrows()).map(move |i| self.row(i))
+        (0..self.permutations.rows.len()).map(move |i| self.row(i))
     }
 
     /// Returns a new matrix with the permutations applied, its element
@@ -201,9 +210,52 @@ impl<'a, T> PermutedMatrix<'a, T> {
     where
         T: Clone,
     {
-        Mat::from_fn(self.matrix.nrows(), self.matrix.ncols(), |i, j| {
-            self[(i, j)].clone()
-        })
+        Mat::from_fn(
+            self.permutations.rows.len(),
+            self.permutations.columns.len(),
+            |i, j| self[(i, j)].clone(),
+        )
+    }
+
+    /// Returns an iterator over the elements of logical row `i` in the
+    /// logical `columns`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `i` is not smaller than [`Self::nrows`] or `columns` isn't
+    /// a range of columns.
+    pub fn row_from(
+        &self,
+        i: usize,
+        columns: Range<usize>,
+    ) -> impl DoubleEndedIterator<Item = &T> + ExactSizeIterator<Item = &T> {
+        let (row, nrows) = (self.permutations.rows[i], self.nrows());
+        self.permutations.columns[columns]
+            .iter()
+            .map(move |column| &self.values[row + column * nrows])
+    }
+
+    /// Adds `factor` times logical row `source` to logical row `target`, in
+    /// the logical `columns`: `m[(target, j)] = m[(target, j)] + factor·m[(source, j)]`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `target` or `source` is not smaller than [`Self::nrows`] or
+    /// `columns` isn't a range of columns.
+    pub fn add_scaled_row(&mut self, target: usize, source: usize, factor: T, columns: Range<usize>)
+    where
+        T: Copy + Add<Output = T> + Mul<Output = T>,
+    {
+        let nrows = self.nrows();
+        let (target, source) = (
+            self.permutations.rows[target],
+            self.permutations.rows[source],
+        );
+        for column in &self.permutations.columns[columns] {
+            let offset = column * nrows;
+            self.values[target + offset] =
+                self.values[target + offset] + factor * self.values[source + offset];
+        }
     }
 
     /// Swaps logical rows `a` and `b`.
@@ -271,7 +323,7 @@ impl<'a, T> Index<(usize, usize)> for PermutedMatrix<'a, T> {
     type Output = T;
 
     fn index(&self, (i, j): (usize, usize)) -> &Self::Output {
-        &self.matrix[(self.permutations.rows[i], self.permutations.columns[j])]
+        &self.values[self.permutations.rows[i] + self.permutations.columns[j] * self.nrows()]
     }
 }
 
@@ -283,7 +335,8 @@ impl<'a, T> Index<(usize, usize)> for PermutedMatrix<'a, T> {
 /// Panics if `i` or `j` is out of bounds.
 impl<'a, T> IndexMut<(usize, usize)> for PermutedMatrix<'a, T> {
     fn index_mut(&mut self, (i, j): (usize, usize)) -> &mut Self::Output {
-        &mut self.matrix[(self.permutations.rows[i], self.permutations.columns[j])]
+        let nrows = self.nrows();
+        &mut self.values[self.permutations.rows[i] + self.permutations.columns[j] * nrows]
     }
 }
 

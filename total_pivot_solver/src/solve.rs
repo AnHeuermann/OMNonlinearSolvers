@@ -32,12 +32,14 @@ use permuted_matrix::{Permutations, PermutedMatrix};
 use crate::backward_elimination::backward_elimination;
 use crate::forward_elimination::forward_elimination;
 
-/// Buffers of [`solve`] for `n×(n+1)` systems: the permutations of the pivot
-/// search and the solution.
+/// Buffers of [`solve`] for `n×(n+1)` systems: the matrix it eliminates, the
+/// permutations of the pivot search and the solution.
 ///
 /// Allocated once and reused, so a solve doesn't allocate.
 #[derive(Debug)]
 pub struct Workspace {
+    /// The matrix, column after column
+    values: Box<[f64]>,
     permutations: Permutations,
     x: Box<[f64]>,
 }
@@ -46,6 +48,7 @@ impl Workspace {
     /// Allocates the buffers for `n×(n+1)` systems.
     pub fn new(n: usize) -> Self {
         Workspace {
+            values: vec![0.0; n * (n + 1)].into(),
             permutations: Permutations::new(n, n + 1),
             x: vec![0.0; n + 1].into(),
         }
@@ -105,7 +108,9 @@ pub enum SolveError {
 /// ```tex
 /// A · x = 0,   with one entry of x fixed to 1
 /// ```
-/// where `A` is a `n×(n+1)` column-major matrix, `x` a vector of size `n+1`.
+/// where `A` is a `n×(n+1)` matrix, `x` a vector of size `n+1`. The
+/// elimination works on a copy of `matrix` in `work`, as a slice column after
+/// column, which is faster than indexing a faer matrix.
 ///
 /// - `pos`: the entry of `x` fixed to 1. `Some(n)` fixes the last column and
 ///   solves `J·x = -b` for `A = [J | -b]`. `None` lets the solver choose the
@@ -130,7 +135,7 @@ pub enum SolveError {
 /// Panics if `matrix` is not `n×(n+1)`, `pos` is not a valid column index or
 /// `work` has another size.
 pub fn solve<'w>(
-    matrix: &mut Mat<f64>,
+    matrix: &Mat<f64>,
     pos: Option<usize>,
     is_casual_tearing_set: bool,
     work: &'w mut Workspace,
@@ -150,7 +155,13 @@ pub fn solve<'w>(
         return Err(SolveError::MatrixNotFinite);
     }
 
-    let mut matrix = PermutedMatrix::new(matrix, &mut work.permutations);
+    assert_eq!(work.x.len(), n_cols, "Workspace has wrong size");
+    for (values, column) in work.values.chunks_exact_mut(n_rows).zip(matrix.col_iter()) {
+        for (value, entry) in values.iter_mut().zip(column.iter()) {
+            *value = *entry;
+        }
+    }
+    let mut matrix = PermutedMatrix::new(&mut work.values, &mut work.permutations);
 
     // The fixed column is no pivot candidate
     let n_pivot_columns = if pos.is_some() { n_rows } else { n_cols };

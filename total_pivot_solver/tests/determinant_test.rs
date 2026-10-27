@@ -59,10 +59,10 @@ fn assert_logged(logs: &[testing_logger::CapturedLog], level: log::Level) {
 /// the system is solved normally, without warning or error.
 fn determinant_overflow_test() {
     testing_logger::setup();
-    let mut matrix = diagonal_system(&[1e4; 100]);
+    let matrix = diagonal_system(&[1e4; 100]);
 
     let mut work = Workspace::new(matrix.nrows());
-    let solution = solve(&mut matrix, Some(100), false, &mut work).unwrap();
+    let solution = solve(&matrix, Some(100), false, &mut work).unwrap();
 
     // The right-hand side is zero, so all unknowns are zero
     let mut expected = vec![0.0; 101];
@@ -83,10 +83,10 @@ fn determinant_overflow_test() {
 /// gives `∞ · 0 = NaN`. `solve` logs an error and fails, like C.
 fn determinant_nan_test() {
     testing_logger::setup();
-    let mut matrix = diagonal_system(&[1e200, 1e200, 0.0]);
+    let matrix = diagonal_system(&[1e200, 1e200, 0.0]);
 
     let mut work = Workspace::new(matrix.nrows());
-    let result = solve(&mut matrix, Some(3), false, &mut work);
+    let result = solve(&matrix, Some(3), false, &mut work);
 
     assert!(result.is_err(), "solve must fail for a NaN determinant");
     testing_logger::validate(|logs| assert_logged(logs, log::Level::Error));

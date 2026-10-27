@@ -49,10 +49,10 @@ fn approx_eq_eps() -> CwiseMat<ApproxEq<f64>> {
 /// ```
 /// Solution: `x = [1, 3]`, with the fixed last entry `[1, 3, 1]`.
 fn total_pivot_test_1() {
-    let mut matrix = mat![[2.0, 1.0, -5.0], [1.0, 3.0, -10.0],];
+    let matrix = mat![[2.0, 1.0, -5.0], [1.0, 3.0, -10.0],];
 
     let mut work = Workspace::new(matrix.nrows());
-    let solution = solve(&mut matrix, Some(2), false, &mut work).unwrap();
+    let solution = solve(&matrix, Some(2), false, &mut work).unwrap();
 
     assert!(ColRef::from_slice(solution.x) :approx_eq_eps(): col![1.0, 3.0, 1.0]);
     assert!(solution.rank == 2);
@@ -79,14 +79,14 @@ fn total_pivot_test_1() {
 /// Without pivoting the first step would divide by `A[0, 0] = 0`. Total
 /// pivoting starts with the largest entry, `4` at `(2, 2)`.
 fn total_pivot_test_zeros() {
-    let mut matrix = mat![
+    let matrix = mat![
         [0.0, 2.0, 0.0, -4.0],
         [3.0, 0.0, 1.0, -6.0],
         [0.0, 1.0, 4.0, -14.0],
     ];
 
     let mut work = Workspace::new(matrix.nrows());
-    let solution = solve(&mut matrix, Some(3), false, &mut work).unwrap();
+    let solution = solve(&matrix, Some(3), false, &mut work).unwrap();
 
     assert!(ColRef::from_slice(solution.x) :approx_eq_eps(): col![1.0, 2.0, 3.0, 1.0]);
     assert!(solution.rank == 3);
@@ -107,14 +107,14 @@ fn total_pivot_test_zeros() {
 /// `x₁`, which gives `x = [0, 2.5, 1.5]`. The determinant vanishes, but the
 /// system is no casual tearing set, so the status is `Solved`.
 fn total_pivot_test_rank_deficient() {
-    let mut matrix = mat![
+    let matrix = mat![
         [1.0, 3.0, 1.0, -9.0],
         [1.0, 1.0, -1.0, -1.0],
         [3.0, 11.0, 5.0, -35.0],
     ];
 
     let mut work = Workspace::new(matrix.nrows());
-    let solution = solve(&mut matrix, Some(3), false, &mut work).unwrap();
+    let solution = solve(&matrix, Some(3), false, &mut work).unwrap();
 
     assert!(ColRef::from_slice(solution.x) :approx_eq_eps(): col![0.0, 2.5, 1.5, 1.0]);
     assert!(solution.rank == 2);
@@ -125,14 +125,14 @@ fn total_pivot_test_rank_deficient() {
 /// The rank-deficient system from above as a casual tearing set: the solution
 /// is the same, but the vanishing determinant is reported.
 fn total_pivot_test_rank_deficient_casual() {
-    let mut matrix = mat![
+    let matrix = mat![
         [1.0, 3.0, 1.0, -9.0],
         [1.0, 1.0, -1.0, -1.0],
         [3.0, 11.0, 5.0, -35.0],
     ];
 
     let mut work = Workspace::new(matrix.nrows());
-    let solution = solve(&mut matrix, Some(3), true, &mut work).unwrap();
+    let solution = solve(&matrix, Some(3), true, &mut work).unwrap();
 
     assert!(ColRef::from_slice(solution.x) :approx_eq_eps(): col![0.0, 2.5, 1.5, 1.0]);
     assert!(matches!(
@@ -145,10 +145,10 @@ fn total_pivot_test_rank_deficient_casual() {
 /// A regular casual tearing set: the determinant `5` does not vanish, the
 /// status stays `Solved`.
 fn total_pivot_test_regular_casual() {
-    let mut matrix = mat![[2.0, 1.0, -5.0], [1.0, 3.0, -10.0],];
+    let matrix = mat![[2.0, 1.0, -5.0], [1.0, 3.0, -10.0],];
 
     let mut work = Workspace::new(matrix.nrows());
-    let solution = solve(&mut matrix, Some(2), true, &mut work).unwrap();
+    let solution = solve(&matrix, Some(2), true, &mut work).unwrap();
 
     assert!(matches!(solution.status, SolveStatus::Solved));
 }
@@ -160,10 +160,10 @@ fn total_pivot_test_regular_casual() {
 /// x₁ + x₂ = 2
 /// ```
 fn total_pivot_test_inconsistent() {
-    let mut matrix = mat![[1.0, 1.0, -1.0], [1.0, 1.0, -2.0]];
+    let matrix = mat![[1.0, 1.0, -1.0], [1.0, 1.0, -2.0]];
 
     let mut work = Workspace::new(matrix.nrows());
-    let result = solve(&mut matrix, Some(2), false, &mut work);
+    let result = solve(&matrix, Some(2), false, &mut work);
 
     assert!(matches!(result, Err(SolveError::UnderDetermined)));
 }
@@ -173,10 +173,10 @@ fn total_pivot_test_inconsistent() {
 /// unknowns. The pivot is the largest entry `-2` in column 1, so column 0
 /// is the fixed one: `y = [1, 0.5]`.
 fn total_pivot_test_tangent_1x2() {
-    let mut matrix = mat![[1.0, -2.0]];
+    let matrix = mat![[1.0, -2.0]];
 
     let mut work = Workspace::new(matrix.nrows());
-    let solution = solve(&mut matrix, None, false, &mut work).unwrap();
+    let solution = solve(&matrix, None, false, &mut work).unwrap();
 
     assert!(ColRef::from_slice(solution.x) :approx_eq_eps(): col![1.0, 0.5]);
     assert!(solution.fixed_column == 0);
@@ -192,10 +192,10 @@ fn total_pivot_test_tangent_1x2() {
 /// The pivots are in columns 2 and 1, so column 0 is the fixed one:
 /// `y = [1, -0.8, 0.2]`.
 fn total_pivot_test_tangent_2x3() {
-    let mut matrix = mat![[1.0, 2.0, 3.0], [0.0, 1.0, 4.0]];
+    let matrix = mat![[1.0, 2.0, 3.0], [0.0, 1.0, 4.0]];
 
     let mut work = Workspace::new(matrix.nrows());
-    let solution = solve(&mut matrix, None, false, &mut work).unwrap();
+    let solution = solve(&matrix, None, false, &mut work).unwrap();
 
     assert!(ColRef::from_slice(solution.x) :approx_eq_eps(): col![1.0, -0.8, 0.2]);
     assert!(solution.rank == 2);
@@ -205,14 +205,14 @@ fn total_pivot_test_tangent_2x3() {
 #[test]
 /// A matrix with NaN is rejected before the elimination
 fn nan_test() {
-    let mut m = mat![
+    let m = mat![
         [0.0, 1.0, 0.0, -1.0],
         [1.0, 0.0, 0.0, f64::NAN],
         [0.0, 1.0, 4.0, -3.0]
     ];
 
     let mut work = Workspace::new(m.nrows());
-    let result = solve(&mut m, Some(3), false, &mut work);
+    let result = solve(&m, Some(3), false, &mut work);
 
     assert!(matches!(result, Err(SolveError::MatrixNotFinite)));
 }
@@ -222,14 +222,11 @@ fn nan_test() {
 /// solve don't leak into the second
 fn workspace_reuse_test() {
     let mut work = Workspace::new(2);
-    let mut first = mat![[0.0, 1.0, -2.0], [1.0, 0.0, -3.0]];
-    let mut second = mat![[1.0, 0.0, -3.0], [0.0, 1.0, -2.0]];
+    let first = mat![[0.0, 1.0, -2.0], [1.0, 0.0, -3.0]];
+    let second = mat![[1.0, 0.0, -3.0], [0.0, 1.0, -2.0]];
 
-    let x_first = solve(&mut first, Some(2), false, &mut work)
-        .unwrap()
-        .x
-        .to_vec();
-    let solution = solve(&mut second, Some(2), false, &mut work).unwrap();
+    let x_first = solve(&first, Some(2), false, &mut work).unwrap().x.to_vec();
+    let solution = solve(&second, Some(2), false, &mut work).unwrap();
 
     assert!(ColRef::from_slice(&x_first) :approx_eq_eps(): col![3.0, 2.0, 1.0]);
     assert!(ColRef::from_slice(solution.x) :approx_eq_eps(): col![3.0, 2.0, 1.0]);
