@@ -116,7 +116,7 @@ nominal values of 1, no bounds, no casual tearing set.
 ### `ClosureModel` for small systems
 
 `ClosureModel` builds a model from a closure, mainly for tests. It is planned
-to move into a test-support crate, see [TODO.md](TODO.md).
+to move into a test-support crate, see [#7](https://github.com/OpenModelica/OMNonlinearSolvers/issues/7).
 
 ## Linear Algebra
 
